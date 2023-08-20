@@ -14,3 +14,4 @@ plugins/ExtraCodeCoverage
 .sf/
 rollup-namespaced/source
 sfge-*.log.gz
+.DS_Store
