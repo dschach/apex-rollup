@@ -17,7 +17,7 @@
     "@prettier/plugin-xml": "latest",
     "@salesforce/eslint-config-lwc": "latest",
     "@salesforce/eslint-plugin-lightning": "latest",
-    "@salesforce/sfdx-lwc-jest": "0.12.5",
+    "@salesforce/sfdx-lwc-jest": "3.0.1",
     "@salesforce/sfdx-scanner": "3.10.0",
     "eslint": "latest",
     "eslint-config-prettier": "latest",
