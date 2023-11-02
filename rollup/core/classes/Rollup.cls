@@ -53,7 +53,6 @@ global without sharing virtual class Rollup implements RollupLogger.ToStringObje
 
   // Lazy-load section. Lots of additional lines, but with the benefit that we keep the heap size down for instances of Rollup
   // that never reference these variables
-  @TestVisible
   private static final Map<SObjectType, Set<TriggerOperation>> CACHED_APEX_OPERATIONS {
     get {
       if (CACHED_APEX_OPERATIONS == null) {
@@ -464,6 +463,11 @@ global without sharing virtual class Rollup implements RollupLogger.ToStringObje
     if (ref != null) {
       props.put(key, JSON.serializePretty(ref));
     }
+  }
+
+  protected void cleanupStaticVars() {
+    Rollup.records = null;
+    Rollup.oldRecordsMap = null;
   }
 
   /**
@@ -1583,9 +1587,9 @@ global without sharing virtual class Rollup implements RollupLogger.ToStringObje
     }
 
     Set<String> uniqueFieldNames = new Set<String>();
-    RollupRepository.PermissionLevel accessLevel = RollupRepository.PermissionLevel.SYSTEM_MODE;
+    RollupRepository.PermissionLevel permissionLevel = RollupRepository.PermissionLevel.SYSTEM_MODE;
     for (Rollup__mdt rollupInfo : matchingMetadata) {
-      accessLevel = RollupMetaPicklists.getAccessLevel(rollupInfo);
+      permissionLevel = RollupMetaPicklists.getAccessLevel(rollupInfo);
       RollupEvaluator.WhereFieldEvaluator eval = String.isBlank(rollupInfo.CalcItemWhereClause__c)
         ? null
         : RollupEvaluator.getWhereEval(rollupInfo.CalcItemWhereClause__c, sObjectType);
@@ -1616,7 +1620,7 @@ global without sharing virtual class Rollup implements RollupLogger.ToStringObje
     // getting the items back from the database before putting them into the map is an important step
     // we COULD just initialize the map with the query, but then the map's .values() list doesn't return
     // anything for .getSObjectType() - which we need, further downstream
-    List<SObject> cdcCalcItems = new RollupRepository(accessLevel).setQuery(queryString).setArg(updatedRecordIds).get();
+    List<SObject> cdcCalcItems = new RollupRepository(permissionLevel).setQuery(queryString).setArg(updatedRecordIds).get();
     Map<Id, SObject> cdcCalcItemsMap = new Map<Id, SObject>(cdcCalcItems);
 
     Rollup rollupToReturn = runFromApex(matchingMetadata, null, cdcCalcItems, cdcCalcItemsMap);
@@ -2306,7 +2310,7 @@ global without sharing virtual class Rollup implements RollupLogger.ToStringObje
     Boolean shouldQueue =
       wrappedMeta.recordCount != RollupRepository.SENTINEL_COUNT_VALUE &&
       wrappedMeta.recordCount < parentResetProcessor.rollupControl.MaxLookupRowsBeforeBatching__c;
-    if (wrappedMeta.recordCount == 0 && wrappedMeta.metadata.isEmpty() == false && isFullRecalcApp) {
+    if (wrappedMeta.recordCount == 0 && wrappedMeta.metadata.isEmpty() == false && isFullRecalcApp && control.ShouldSkipResettingParentFields__c == false) {
       return parentResetProcessor;
     } else if (
       (invokePoint != InvocationPoint.FROM_FULL_RECALC_LWC && invokePoint != InvocationPoint.FROM_FULL_RECALC_FLOW) ||
@@ -2711,6 +2715,18 @@ global without sharing virtual class Rollup implements RollupLogger.ToStringObje
       SObjectField lookupFieldOnOpObject = init.getSObjectFieldByName(lookupItemFields, rollupMetadata.LookupFieldOnLookupObject__c);
       SObjectField rollupFieldOnOpObject = init.getSObjectFieldByName(lookupItemFields, rollupMetadata.RollupFieldOnLookupObject__c);
 
+      if (rollupFieldOnCalcItem == null || calcLookupField == null || lookupFieldOnOpObject == null || rollupFieldOnOpObject == null) {
+        Map<String, String> errorMap = new Map<String, String>{
+          'Child rollup field' => '' + rollupFieldOnCalcItem,
+          'Child lookup field' => '' + calcLookupField,
+          'Parent lookup field' => '' + lookupFieldOnOpObject,
+          'Parent rollup field' => '' + rollupFieldOnOpObject
+        };
+        throw new System.IllegalArgumentException(
+          'At least one of the following values is null when it should not be. Check your rollup configs for possible misspellings: ' + JSON.serialize(errorMap)
+        );
+      }
+
       if (isFullRecalcOp(getBaseOperationName(rollupMetadata.RollupOperation__c)) || rollupMetadata.GroupByFields__c != null) {
         rollupMetadata.IsFullRecordSet__c = true;
       }
@@ -3045,7 +3061,9 @@ global without sharing virtual class Rollup implements RollupLogger.ToStringObje
         // and the old value wouldn't have been excluded, pass it on through
         // to be handled further downstream
         results.matchingItemIds.add(item.Id);
-      } else if (metadata?.IsFullRecordSet__c == true) {
+      } else if (metadata.IsFullRecordSet__c == true) {
+        results.matchingItemIds.add(item.Id);
+      } else if (metadata.FullRecalculationDefaultNumberValue__c != null || metadata.FullRecalculationDefaultStringValue__c != null) {
         results.matchingItemIds.add(item.Id);
       }
     }

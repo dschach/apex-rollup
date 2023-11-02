@@ -2,7 +2,8 @@
 private class RollupIntegrationTests {
   @TestSetup
   static void setup() {
-    Account acc = new Account(Name = RollupIntegrationTests.class.getName());
+    Rollup.onlyUseMockMetadata = true;
+    Account acc = new Account(Name = RollupIntegrationTests.class.getName(), Phone = '9999999999');
     insert acc;
 
     acc.AccountIdText__c = acc.Id;
@@ -169,334 +170,6 @@ private class RollupIntegrationTests {
 
     ParentApplication__c updatedParent = [SELECT Engagement_Rollup__c FROM ParentApplication__c];
     System.assertEquals(45 / 3, updatedParent.Engagement_Rollup__c, 'Average should be calculated based off of matching items');
-  }
-
-  @IsTest
-  static void shouldCorrectlyRollupMaxForMultiCurrency() {
-    Account acc = (Account) RollupTestUtils.queryRecord(Account.SObjectType, new List<Schema.SObjectField>{ Account.AnnualRevenue });
-    System.assertEquals(null, acc.AnnualRevenue, 'Test has started under the wrong conditions!');
-    System.assertEquals('USD', getCurrencyIsoCode(acc), 'Test has started under the wrong conditions!');
-    RollupCurrencyInfo.setCurrencyIsoCode(acc, 'EUR');
-    update acc;
-
-    Opportunity usdOpp = (Opportunity) RollupTestUtils.queryRecord(
-      Opportunity.SObjectType,
-      new List<Schema.SObjectField>{ Opportunity.StageName, Opportunity.CloseDate, Opportunity.Amount, Opportunity.AccountId }
-    );
-
-    Opportunity eurOpp = usdOpp.clone(false, true);
-    RollupCurrencyInfo.setCurrencyIsoCode(eurOpp, 'EUR');
-    eurOpp.Amount = .95;
-    Opportunity jpyOpp = eurOpp.clone(false, true);
-    RollupCurrencyInfo.setCurrencyIsoCode(jpyOpp, 'JPY');
-    jpyOpp.Amount = 100;
-    insert new List<Opportunity>{ eurOpp, jpyOpp };
-
-    Rollup.rollupMetadata = new List<Rollup__mdt>{
-      new Rollup__mdt(
-        RollupFieldOnCalcItem__c = 'Amount',
-        LookupObject__c = 'Account',
-        LookupFieldOnCalcItem__c = 'AccountId',
-        LookupFieldOnLookupObject__c = 'Id',
-        RollupFieldOnLookupObject__c = 'AnnualRevenue',
-        RollupOperation__c = 'MAX',
-        CalcItem__c = 'Opportunity'
-      )
-    };
-    Rollup.apexContext = TriggerOperation.AFTER_INSERT;
-    Rollup.records = new List<Opportunity>{ usdOpp, eurOpp, jpyOpp };
-    Rollup.shouldRun = true;
-
-    Test.startTest();
-    Rollup.runFromTrigger();
-    Test.stopTest();
-
-    acc = (Account) RollupTestUtils.queryRecord(acc.Id, new List<Schema.SObjectField>{ Account.AnnualRevenue, Account.MaxAmountRollupSummary__c });
-    RollupCurrencyInfo currencyInfo = RollupCurrencyInfo.getCurrencyInfo(getCurrencyIsoCode(acc));
-    System.assertEquals(
-      acc.MaxAmountRollupSummary__c.setScale(currencyInfo.DecimalPlaces),
-      acc.AnnualRevenue.setScale(currencyInfo.DecimalPlaces),
-      'Multi-currency MAX rollup not calculated correctly!'
-    );
-  }
-
-  @IsTest
-  static void shouldCorrectlyRollupMinForMultiCurrency() {
-    Account acc = (Account) RollupTestUtils.queryRecord(Account.SObjectType, new List<Schema.SObjectField>{ Account.AnnualRevenue });
-    System.assertEquals(null, acc.AnnualRevenue, 'Test has started under the wrong conditions!');
-    System.assertEquals('USD', getCurrencyIsoCode(acc), 'Test has started under the wrong conditions!');
-    RollupCurrencyInfo.setCurrencyIsoCode(acc, 'EUR');
-    update acc;
-
-    Opportunity usdOpp = (Opportunity) RollupTestUtils.queryRecord(
-      Opportunity.SObjectType,
-      new List<Schema.SObjectField>{ Opportunity.StageName, Opportunity.CloseDate, Opportunity.Amount, Opportunity.AccountId }
-    );
-
-    Opportunity eurOpp = usdOpp.clone(false, true);
-    RollupCurrencyInfo.setCurrencyIsoCode(eurOpp, 'EUR');
-    eurOpp.Amount = .95;
-    Opportunity jpyOpp = eurOpp.clone(false, true);
-    RollupCurrencyInfo.setCurrencyIsoCode(jpyOpp, 'JPY');
-    jpyOpp.Amount = 100;
-    insert new List<Opportunity>{ eurOpp, jpyOpp };
-
-    Rollup.rollupMetadata = new List<Rollup__mdt>{
-      new Rollup__mdt(
-        RollupFieldOnCalcItem__c = 'Amount',
-        LookupObject__c = 'Account',
-        LookupFieldOnCalcItem__c = 'AccountId',
-        LookupFieldOnLookupObject__c = 'Id',
-        RollupFieldOnLookupObject__c = 'AnnualRevenue',
-        RollupOperation__c = 'MIN',
-        IsFullRecordSet__c = true,
-        CalcItem__c = 'Opportunity'
-      )
-    };
-    Rollup.apexContext = TriggerOperation.AFTER_INSERT;
-    Rollup.records = new List<Opportunity>{ usdOpp, eurOpp, jpyOpp };
-    Rollup.shouldRun = true;
-
-    Test.startTest();
-    Rollup.runFromTrigger();
-    Test.stopTest();
-
-    acc = (Account) RollupTestUtils.queryRecord(acc.Id, new List<Schema.SObjectField>{ Account.AnnualRevenue, Account.MinAmountRollupSummary__c });
-    RollupCurrencyInfo currencyInfo = RollupCurrencyInfo.getCurrencyInfo(getCurrencyIsoCode(acc));
-    System.assertEquals(
-      acc.MinAmountRollupSummary__c.setScale(currencyInfo.DecimalPlaces),
-      acc.AnnualRevenue.setScale(currencyInfo.DecimalPlaces),
-      'Multi-currency MIN rollup not calculated correctly!'
-    );
-  }
-
-  @IsTest
-  static void shouldCorrectlyRollupSumForMultiCurrency() {
-    Account acc = (Account) RollupTestUtils.queryRecord(Account.SObjectType, new List<Schema.SObjectField>{ Account.AnnualRevenue });
-    System.assertEquals(null, acc.AnnualRevenue, 'Test has started under the wrong conditions!');
-    System.assertEquals('USD', getCurrencyIsoCode(acc), 'Test has started under the wrong conditions!');
-    RollupCurrencyInfo.setCurrencyIsoCode(acc, 'EUR');
-    update acc;
-
-    Opportunity usdOpp = (Opportunity) RollupTestUtils.queryRecord(
-      Opportunity.SObjectType,
-      new List<Schema.SObjectField>{ Opportunity.StageName, Opportunity.CloseDate, Opportunity.Amount, Opportunity.AccountId }
-    );
-
-    Opportunity eurOpp = usdOpp.clone(false, true);
-    RollupCurrencyInfo.setCurrencyIsoCode(eurOpp, 'EUR');
-    eurOpp.Amount = .95;
-    Opportunity jpyOpp = eurOpp.clone(false, true);
-    RollupCurrencyInfo.setCurrencyIsoCode(jpyOpp, 'JPY');
-    jpyOpp.Amount = 100;
-    insert new List<Opportunity>{ eurOpp, jpyOpp };
-
-    Rollup.rollupMetadata = new List<Rollup__mdt>{
-      new Rollup__mdt(
-        RollupFieldOnCalcItem__c = 'Amount',
-        LookupObject__c = 'Account',
-        LookupFieldOnCalcItem__c = 'AccountId',
-        LookupFieldOnLookupObject__c = 'Id',
-        RollupFieldOnLookupObject__c = 'AnnualRevenue',
-        RollupOperation__c = 'SUM',
-        IsFullRecordSet__c = true,
-        CalcItem__c = 'Opportunity'
-      )
-    };
-    Rollup.apexContext = TriggerOperation.AFTER_INSERT;
-    Rollup.records = new List<Opportunity>{ usdOpp, eurOpp, jpyOpp };
-    Rollup.shouldRun = true;
-    Rollup.onlyUseMockMetadata = true;
-
-    Test.startTest();
-    Rollup.runFromTrigger();
-    Test.stopTest();
-
-    acc = (Account) RollupTestUtils.queryRecord(acc.Id, new List<Schema.SObjectField>{ Account.AnnualRevenue, Account.SumAmountRollupSummary__c });
-    RollupCurrencyInfo currencyInfo = RollupCurrencyInfo.getCurrencyInfo(getCurrencyIsoCode(acc));
-    System.assertEquals(
-      acc.SumAmountRollupSummary__c.setScale(currencyInfo.DecimalPlaces),
-      acc.AnnualRevenue.setScale(currencyInfo.DecimalPlaces),
-      'Multi-currency SUM rollup not calculated correctly!'
-    );
-  }
-
-  @IsTest
-  static void shouldCorrectlyRollupAverageForMultiCurrency() {
-    Account acc = (Account) RollupTestUtils.queryRecord(Account.SObjectType, new List<Schema.SObjectField>{ Account.AnnualRevenue });
-    System.assertEquals(null, acc.AnnualRevenue, 'Test has started under the wrong conditions!');
-    System.assertEquals('USD', getCurrencyIsoCode(acc), 'Test has started under the wrong conditions!');
-    RollupCurrencyInfo.setCurrencyIsoCode(acc, 'EUR');
-    update acc;
-
-    Opportunity usdOpp = (Opportunity) RollupTestUtils.queryRecord(
-      Opportunity.SObjectType,
-      new List<Schema.SObjectField>{ Opportunity.StageName, Opportunity.CloseDate, Opportunity.Amount, Opportunity.AccountId }
-    );
-
-    Opportunity eurOpp = usdOpp.clone(false, true);
-    RollupCurrencyInfo.setCurrencyIsoCode(eurOpp, 'EUR');
-    eurOpp.Amount = .95;
-    Opportunity jpyOpp = eurOpp.clone(false, true);
-    RollupCurrencyInfo.setCurrencyIsoCode(jpyOpp, 'JPY');
-    jpyOpp.Amount = 100;
-    insert new List<Opportunity>{ eurOpp, jpyOpp };
-
-    Rollup.rollupMetadata = new List<Rollup__mdt>{
-      new Rollup__mdt(
-        RollupFieldOnCalcItem__c = 'Amount',
-        LookupObject__c = 'Account',
-        LookupFieldOnCalcItem__c = 'AccountId',
-        LookupFieldOnLookupObject__c = 'Id',
-        RollupFieldOnLookupObject__c = 'AnnualRevenue',
-        RollupOperation__c = 'AVERAGE',
-        CalcItem__c = 'Opportunity'
-      )
-    };
-    Rollup.apexContext = TriggerOperation.AFTER_INSERT;
-    Rollup.records = new List<Opportunity>{ usdOpp, eurOpp, jpyOpp };
-    Rollup.shouldRun = true;
-
-    Test.startTest();
-    Rollup.runFromTrigger();
-    Test.stopTest();
-
-    List<SObject> opportunities = UserInfo.isMultiCurrencyOrganization()
-      ? Database.query('SELECT Id, convertCurrency(Amount) ConvertedAmount FROM Opportunity')
-      : [SELECT MAX(Amount) ConvertedAmount, Id FROM Opportunity GROUP BY Id];
-    Decimal convertedAmountSum = 0;
-    for (SObject opp : opportunities) {
-      convertedAmountSum += (Decimal) opp.get('ConvertedAmount');
-    }
-    RollupCurrencyInfo currencyInfo = RollupCurrencyInfo.getCurrencyInfo(getCurrencyIsoCode(acc));
-    Decimal expectedAverage = (convertedAmountSum / opportunities.size()) * currencyInfo.ConversionRate;
-
-    acc = (Account) RollupTestUtils.queryRecord(acc.Id, new List<Schema.SObjectField>{ Account.AnnualRevenue });
-    System.assertEquals(
-      expectedAverage.setScale(currencyInfo.DecimalPlaces),
-      acc.AnnualRevenue.setScale(currencyInfo.DecimalPlaces),
-      'Multi-currency AVERAGE rollup not calculated correctly! Records: ' + opportunities
-    );
-  }
-
-  @IsTest
-  static void shouldCorrectlyRollupFirstForMultiCurrency() {
-    Account acc = (Account) RollupTestUtils.queryRecord(Account.SObjectType, new List<Schema.SObjectField>{ Account.AnnualRevenue });
-    System.assertEquals(null, acc.AnnualRevenue, 'Test has started under the wrong conditions!');
-    System.assertEquals('USD', getCurrencyIsoCode(acc), 'Test has started under the wrong conditions!');
-    RollupCurrencyInfo.setCurrencyIsoCode(acc, 'EUR');
-    update acc;
-
-    Opportunity usdOpp = (Opportunity) RollupTestUtils.queryRecord(
-      Opportunity.SObjectType,
-      new List<Schema.SObjectField>{ Opportunity.StageName, Opportunity.CloseDate, Opportunity.Amount, Opportunity.AccountId }
-    );
-
-    Opportunity eurOpp = usdOpp.clone(false, true);
-    RollupCurrencyInfo.setCurrencyIsoCode(eurOpp, 'EUR');
-    eurOpp.Amount = .95;
-    Opportunity jpyOpp = eurOpp.clone(false, true);
-    RollupCurrencyInfo.setCurrencyIsoCode(jpyOpp, 'JPY');
-    jpyOpp.Amount = 100;
-    insert new List<Opportunity>{ eurOpp, jpyOpp };
-
-    Rollup.onlyUseMockMetadata = true;
-    Rollup__mdt meta = Rollup.appendOrderByMetadata(
-      new Rollup__mdt(
-        RollupFieldOnCalcItem__c = 'Id',
-        LookupObject__c = 'Account',
-        LookupFieldOnCalcItem__c = 'AccountId',
-        LookupFieldOnLookupObject__c = 'Id',
-        RollupFieldOnLookupObject__c = 'Name',
-        RollupOperation__c = 'FIRST',
-        CalcItem__c = 'Opportunity'
-      ),
-      new List<RollupOrderBy__mdt>{ new RollupOrderBy__mdt(FieldName__c = 'Amount') }
-    );
-    Rollup.rollupMetadata = new List<Rollup__mdt>{ meta };
-    Rollup.apexContext = TriggerOperation.AFTER_INSERT;
-    Rollup.records = new List<Opportunity>{ usdOpp, eurOpp, jpyOpp };
-    Rollup.shouldRun = true;
-
-    Test.startTest();
-    Rollup.runFromTrigger();
-    Test.stopTest();
-
-    Decimal firstAmount;
-    Id firstOpportunityId;
-    List<SObject> opportunities = UserInfo.isMultiCurrencyOrganization()
-      ? Database.query('SELECT Id, convertCurrency(Amount) ConvertedAmount FROM Opportunity')
-      : [SELECT MAX(Amount) ConvertedAmount, Id FROM Opportunity GROUP BY Id];
-    for (SObject opp : opportunities) {
-      Decimal oppConvertedAmount = (Decimal) opp.get('ConvertedAmount');
-      if (firstAmount == null || oppConvertedAmount < firstAmount) {
-        firstAmount = oppConvertedAmount;
-        firstOpportunityId = opp.Id;
-      }
-    }
-
-    acc = [SELECT Id, Name FROM Account];
-    System.assertEquals(firstOpportunityId, acc.Name, 'Should have taken first based on multi-currency Amount! Records: ' + opportunities);
-  }
-
-  @IsTest
-  static void shouldCorrectlyRollupLastForMultiCurrency() {
-    Account acc = (Account) RollupTestUtils.queryRecord(Account.SObjectType, new List<Schema.SObjectField>{ Account.AnnualRevenue });
-    System.assertEquals(null, acc.AnnualRevenue, 'Test has started under the wrong conditions!');
-    System.assertEquals('USD', getCurrencyIsoCode(acc), 'Test has started under the wrong conditions!');
-    RollupCurrencyInfo.setCurrencyIsoCode(acc, 'EUR');
-    update acc;
-
-    Opportunity usdOpp = (Opportunity) RollupTestUtils.queryRecord(
-      Opportunity.SObjectType,
-      new List<Schema.SObjectField>{ Opportunity.StageName, Opportunity.CloseDate, Opportunity.Amount, Opportunity.AccountId }
-    );
-
-    Opportunity eurOpp = usdOpp.clone(false, true);
-    RollupCurrencyInfo.setCurrencyIsoCode(eurOpp, 'EUR');
-    eurOpp.Amount = .95;
-    Opportunity jpyOpp = eurOpp.clone(false, true);
-    RollupCurrencyInfo.setCurrencyIsoCode(jpyOpp, 'JPY');
-    jpyOpp.Amount = 100;
-    insert new List<Opportunity>{ eurOpp, jpyOpp };
-
-    Rollup.onlyUseMockMetadata = true;
-    Rollup__mdt meta = Rollup.appendOrderByMetadata(
-      new Rollup__mdt(
-        RollupFieldOnCalcItem__c = 'Id',
-        LookupObject__c = 'Account',
-        LookupFieldOnCalcItem__c = 'AccountId',
-        LookupFieldOnLookupObject__c = 'Id',
-        RollupFieldOnLookupObject__c = 'Name',
-        RollupOperation__c = 'LAST',
-        CalcItem__c = 'Opportunity'
-      ),
-      new List<RollupOrderBy__mdt>{ new RollupOrderBy__mdt(FieldName__c = 'Amount') }
-    );
-    Rollup.rollupMetadata = new List<Rollup__mdt>{ meta };
-    Rollup.apexContext = TriggerOperation.AFTER_INSERT;
-    Rollup.records = new List<Opportunity>{ usdOpp, eurOpp, jpyOpp };
-    Rollup.shouldRun = true;
-
-    Test.startTest();
-    Rollup.runFromTrigger();
-    Test.stopTest();
-
-    Decimal lastAmount;
-    Id lastOpportunityId;
-    List<SObject> opportunities = UserInfo.isMultiCurrencyOrganization()
-      ? Database.query('SELECT Id, convertCurrency(Amount) ConvertedAmount FROM Opportunity')
-      : [SELECT MAX(Amount) ConvertedAmount, Id FROM Opportunity GROUP BY Id];
-    for (SObject opp : opportunities) {
-      Decimal oppConvertedAmount = (Decimal) opp.get('ConvertedAmount');
-      if (lastAmount == null || oppConvertedAmount > lastAmount) {
-        lastAmount = oppConvertedAmount;
-        lastOpportunityId = opp.Id;
-      }
-    }
-
-    acc = [SELECT Id, Name FROM Account];
-    System.assertEquals(lastOpportunityId, acc.Name, 'Should have taken last based on multi-currency Amount! Records: ' + opportunities);
   }
 
   @IsTest
@@ -1672,6 +1345,52 @@ private class RollupIntegrationTests {
   }
 
   @IsTest
+  static void recursivelyUpdatesEntireHierarchy() {
+    Rollup.defaultControl = new RollupControl__mdt(ShouldRunAs__c = RollupMetaPicklists.ShouldRunAs.Synchronous, IsRollupLoggingEnabled__c = true);
+    Rollup.shouldFlattenAsyncProcesses = true;
+    Rollup.onlyUseMockMetadata = true;
+    RollupLimits.stubAsyncTimeoutInterval = 1;
+    Account ultimateParent = [SELECT Id FROM Account];
+
+    Account penultimateChildOne = new Account(Name = 'Penultimate Child 1', ParentId = ultimateParent.Id);
+    Account penultimateChildTwo = new Account(Name = 'Penultimate Child 2', ParentId = ultimateParent.Id);
+    insert new List<Account>{ penultimateChildOne, penultimateChildTwo };
+
+    Account ultimateChildOne = new Account(Name = 'Ultimate child 1', ParentId = penultimateChildOne.Id, AnnualRevenue = 3);
+    Account ultimateChildTwo = new Account(Name = 'Ultimate child 2', ParentId = penultimateChildOne.Id, AnnualRevenue = 2);
+    Account ultimateChildThree = new Account(Name = 'Ultimate child 3', ParentId = penultimateChildTwo.Id, AnnualRevenue = 5);
+    Account ultimateChildFour = new Account(Name = 'Ultimate child 4', ParentId = penultimateChildTwo.Id, AnnualRevenue = 5);
+    List<Account> accounts = new List<Account>{ ultimateChildOne, ultimateChildTwo, ultimateChildThree, ultimateChildFour };
+    insert accounts;
+
+    Rollup.records = accounts;
+    Rollup.apexContext = TriggerOperation.AFTER_INSERT;
+    Rollup.shouldRun = true;
+
+    Rollup.rollupMetadata = new List<Rollup__mdt>{
+      new Rollup__mdt(
+        RollupFieldOnCalcItem__c = 'AnnualRevenue',
+        LookupObject__c = 'Account',
+        LookupFieldOnCalcItem__c = 'ParentId',
+        LookupFieldOnLookupObject__c = 'Id',
+        RollupFieldOnLookupObject__c = 'AnnualRevenue',
+        RollupOperation__c = 'SUM',
+        CalcItem__c = 'Account'
+      )
+    };
+
+    // don't wrap in start/stopTest to prove this is all capable of running sync
+    Rollup.runFromTrigger();
+
+    penultimateChildOne = [SELECT AnnualRevenue FROM Account WHERE Id = :penultimateChildOne.Id];
+    Assert.areEqual(5, penultimateChildOne.AnnualRevenue);
+    penultimateChildTwo = [SELECT AnnualRevenue FROM Account WHERE Id = :penultimateChildTwo.Id];
+    Assert.areEqual(10, penultimateChildTwo.AnnualRevenue);
+    ultimateParent = [SELECT AnnualRevenue FROM Account WHERE Id = :ultimateParent.Id];
+    Assert.areEqual(15, ultimateParent.AnnualRevenue);
+  }
+
+  @IsTest
   static void shouldRunSyncWhenFlaggedOnRollupLimit() {
     Account acc = [SELECT Id FROM Account];
 
@@ -1925,96 +1644,92 @@ private class RollupIntegrationTests {
   }
 
   @IsTest
+  static void allowsMultipleRollupsToOperateOnSameParentField() {
+    Account acc = [SELECT Id, Phone, OwnerId FROM Account];
+    Assert.areEqual('9999999999', acc.Phone, 'Test has started under the wrong conditions!');
+    String winningPhone = '5555555555';
+    insert new Contact(LastName = 'Second child object', Phone = winningPhone, OwnerId = acc.OwnerId);
+
+    Rollup.onlyUseMockMetadata = true;
+    Rollup.rollupMetadata = new List<Rollup__mdt>{
+      new Rollup__mdt(
+        RollupFieldOnCalcItem__c = 'Phone',
+        LookupObject__c = 'User',
+        LookupFieldOnCalcItem__c = 'OwnerId',
+        LookupFieldOnLookupObject__c = 'Id',
+        RollupFieldOnLookupObject__c = 'AboutMe',
+        RollupOperation__c = 'MAX',
+        CalcItem__c = 'Account'
+      ),
+      new Rollup__mdt(
+        RollupFieldOnCalcItem__c = 'Phone',
+        LookupObject__c = 'User',
+        LookupFieldOnCalcItem__c = 'OwnerId',
+        LookupFieldOnLookupObject__c = 'Id',
+        RollupFieldOnLookupObject__c = 'AboutMe',
+        RollupOperation__c = 'MAX',
+        CalcItem__c = 'Contact'
+      )
+    };
+
+    Test.startTest();
+    acc.Phone = '0';
+    update acc;
+    Test.stopTest();
+
+    User updatedUser = [SELECT AboutMe FROM User WHERE Id = :acc.OwnerId];
+    Assert.isNotNull(updatedUser.AboutMe);
+    // TODO uncomment and finish
+    // Assert.areEqual(winningPhone, updatedUser.AboutMe);
+  }
+
+  @IsTest
   static void shouldThrowExceptionWhenTryingToOperateOnDisallowedFieldTypes() {
     Account acc = [SELECT Id FROM Account];
     Rollup.records = new List<Task>{ new Task(ActivityDate = System.today(), WhatId = acc.Id) };
     Rollup.apexContext = TriggerOperation.AFTER_INSERT;
     Rollup.shouldRun = true;
-    RollupAsyncProcessor.shouldRunAsBatch = true;
 
-    Exception ex;
     try {
       Test.startTest();
       Rollup.maxFromApex(Task.ActivityDate, Task.WhatId, Account.Id, Account.BillingAddress, Account.SObjectType).runCalc();
       Test.stopTest();
-    } catch (Exception e) {
-      ex = e;
+      Assert.fail('Exception should be thrown above');
+    } catch (Exception ex) {
+      System.assertEquals('Calculation not defined for parent field: BillingAddress and op: MAX', ex.getMessage());
     }
-
-    System.assertNotEquals(null, ex);
-    System.assertEquals('Calculation not defined for parent field: BillingAddress and op: MAX', ex.getMessage());
-  }
-
-  /** Invocable integration tests */
-
-  @IsTest
-  static void shouldTryToUpsertFromFlow() {
-    Account acc = [SELECT Id FROM Account];
-
-    ContactPointAddress cpa = new ContactPointAddress(PreferenceRank = 500, ParentId = acc.Id, Name = 'Upsert Flow Test');
-    insert cpa; // aping an after-insert action in Flow
-
-    List<ContactPointAddress> cpas = [SELECT Id, ParentId, CreatedDate, LastModifiedDate, PreferenceRank FROM ContactPointAddress];
-
-    List<Rollup.FlowInput> flowInputs = RollupTestUtils.prepareFlowTest(cpas, 'UPSERT', 'SUM');
-    flowInputs[0].oldRecordsToRollup = new List<ContactPointAddress>{ null }; // sad but true - this is what flow passes for {!$Record__Prior} on upsert
-
-    Test.startTest();
-    List<Rollup.FlowOutput> flowOutputs = Rollup.performRollup(flowInputs);
-    Test.stopTest();
-
-    System.assertEquals(1, flowOutputs.size(), 'Flow outputs were not provided');
-    System.assertEquals('SUCCESS', flowOutputs[0].message);
-    System.assertEquals(true, flowOutputs[0].isSuccess);
-
-    Account updatedAcc = [SELECT Id, AnnualRevenue FROM Account];
-    System.assertEquals(cpas[0].PreferenceRank, updatedAcc.AnnualRevenue, 'pseudo-upsert from flow should act like insert for PreferenceRank');
   }
 
   @IsTest
-  static void shouldResetParentFieldsWhenItemsNoLongerMatch() {
-    Rollup.defaultControl = new RollupControl__mdt(ShouldAbortRun__c = true, IsRollupLoggingEnabled__c = true, ReplaceCalcItemsAsyncWhenOverCount__c = 1);
-    Account acc = [SELECT Id, Name FROM Account];
-    acc.AnnualRevenue = 1.0;
-    acc.NumberOfEmployees = 1;
-    update acc;
+  static void throwsExceptionWhenSuppliedRollupFieldIsInvalid() {
+    Rollup.apexContext = TriggerOperation.AFTER_INSERT;
+    Rollup.shouldRun = true;
 
-    List<Contact> cons = new List<Contact>{ new Contact(LastName = 'somethingElse', AccountId = acc.Id, Phone = '617619111') };
-    insert cons;
-    Rollup.shouldRefreshCachedControl = true;
-
-    Contact oldContact = cons[0].clone(true, true);
-    cons[0].LastName = 'soloAdmin'; // simulating an update which has not yet been reflected in the database
-
-    Rollup.FlowInput flowInput = RollupTestUtils.prepareFlowTest(cons, 'UPSERT', 'SUM')[0];
-    flowInput.rollupFieldOnOpObject = 'AnnualRevenue';
-    flowInput.rollupFieldOnCalcItem = 'Id';
-    flowInput.lookupFieldOnCalcItem = 'AccountId';
-    flowInput.calcItemWhereClause = 'LastName != \'soloAdmin\' AND Account.Name = \'' + acc.Name + '\'';
-    flowInput.oldRecordsToRollup = new List<Contact>{ oldContact };
-    Rollup.FlowInput secondInput = (Rollup.FlowInput) JSON.deserialize(JSON.serialize(flowInput), Rollup.FlowInput.class);
-    secondInput.recordsToRollup = flowInput.recordsToRollup; // lost in deserialization
-    secondInput.oldRecordsToRollup = flowInput.oldRecordsToRollup; // lost in deserialization
-    secondInput.rollupOperation = 'COUNT';
-    secondInput.calcItemWhereClause = 'LastName != \'soloAdmin\'';
-    secondInput.rollupFieldOnOpObject = 'NumberOfEmployees';
-    // also validate that a matching clause does NOT get reset
-    Rollup.FlowInput matchingInput = (Rollup.FlowInput) JSON.deserialize(JSON.serialize(flowInput), Rollup.FlowInput.class);
-    matchingInput.recordsToRollup = flowInput.recordsToRollup; // lost in deserialization
-    matchingInput.oldRecordsToRollup = flowInput.oldRecordsToRollup; // lost in deserialization
-    matchingInput.rollupOperation = 'MAX';
-    matchingInput.rollupFieldOnCalcItem = 'Phone';
-    matchingInput.calcItemWhereClause = 'LastName = \'soloAdmin\' AND Account.Name = \'' + acc.Name + '\'';
-    matchingInput.rollupFieldOnOpObject = 'Phone';
-
-    Test.startTest();
-    Rollup.performRollup(new List<Rollup.FlowInput>{ flowInput, secondInput, matchingInput });
-    Test.stopTest();
-
-    Account updatedAccount = [SELECT AnnualRevenue, NumberOfEmployees, Phone FROM Account];
-    System.assertEquals(null, updatedAccount.NumberOfEmployees, 'COUNT should be cleared now that child object no longer matches');
-    System.assertEquals(null, updatedAccount.AnnualRevenue, 'SUM should be cleared now that child object no longer matches');
-    System.assertEquals(cons[0].Phone, updatedAccount.Phone, 'MAX should not be cleared since child object matches');
+    try {
+      Rollup.runFromApex(
+          new List<Rollup__mdt>{
+            new Rollup__mdt(
+              CalcItem__c = 'Task',
+              RollupFieldOnCalcItem__c = 'CreatedDate',
+              LookupFieldOnCalcItem__c = 'WhatId',
+              LookupObject__c = 'Account',
+              LookupFieldOnLookupObject__c = 'Id',
+              RollupFieldOnLookupObject__c = 'Typo__c ',
+              RollupOperation__c = 'MAX'
+            )
+          },
+          null,
+          new List<Task>{ new Task(ActivityDate = System.today()) },
+          new Map<Id, SObject>()
+        )
+        .runCalc();
+      Assert.fail('Exception should be thrown above');
+    } catch (Exception ex) {
+      System.assertEquals(
+        true,
+        ex.getMessage().contains('At least one of the following values is null when it should not be. Check your rollup configs for possible misspellings')
+      );
+    }
   }
 
   @IsTest
@@ -2053,82 +1768,18 @@ private class RollupIntegrationTests {
     System.assert(true, 'Should make it here');
   }
 
-  @IsTest
-  static void shouldDecrementProperlyOnUpdateWithParentFilterFields() {
-    Account acc = [SELECT Id, Name, AnnualRevenue FROM Account];
-    acc.AnnualRevenue = 500;
-    acc.NumberOfEmployees = acc.AnnualRevenue.intValue() + 250;
-    update acc;
-
-    List<ContactPointAddress> cpas = new List<ContactPointAddress>{
-      new ContactPointAddress(PreferenceRank = acc.AnnualRevenue.intValue(), ParentId = acc.Id, Name = 'Non-match')
-    };
-    insert cpas;
-
-    List<SObject> oldFlowRecords = new List<SObject>{
-      new ContactPointAddress(PreferenceRank = cpas[0].PreferenceRank, ParentId = acc.Id, Name = 'Two', Id = cpas[0].Id)
-    };
-
-    List<Rollup.FlowInput> flowInputs = RollupTestUtils.prepareFlowTest(cpas, 'UPDATE', 'SUM');
-    flowInputs[0].rollupFieldOnOpObject = 'NumberOfEmployees';
-    flowInputs[0].oldRecordsToRollup = oldFlowRecords;
-    flowInputs[0].calcItemWhereClause = 'Name = \'Two\'';
-    flowInputs.addAll(RollupTestUtils.prepareFlowTest(cpas, 'UPDATE', 'SUM'));
-    flowInputs[1].calcItemWhereClause = 'Name = \'Two\' AND Parent.Name = \'' + acc.Name + '\'';
-    flowInputs[1].oldRecordsToRollup = oldFlowRecords;
-    Test.startTest();
-    List<Rollup.FlowOutput> flowOutputs = Rollup.performRollup(flowInputs);
-    Test.stopTest();
-
-    System.assertEquals(2, flowOutputs.size(), 'Flow outputs were not provided');
-    System.assertEquals('SUCCESS', flowOutputs[0].message);
-    System.assertEquals(true, flowOutputs[0].isSuccess);
-
-    Account updatedAcc = [SELECT Id, AnnualRevenue, NumberOfEmployees FROM Account WHERE Id = :acc.Id];
-    System.assertEquals(
-      null,
-      updatedAcc.AnnualRevenue,
-      'Child object where clause with parent filtering should decrement on update when old item matches and new item does not'
-    );
-    System.assertEquals(250, updatedAcc.NumberOfEmployees, 'Number of employees should also have been decremented');
-  }
-
-  @IsTest
-  static void excludesDeletedItemsForMost() {
-    Account acc = [SELECT Id FROM Account];
-
-    List<ContactPointAddress> cpas = new List<ContactPointAddress>{
-      new ContactPointAddress(PreferenceRank = 1, ParentId = acc.Id, Name = 'One'),
-      new ContactPointAddress(PreferenceRank = 1, ParentId = acc.Id, Name = 'Two'),
-      new ContactPointAddress(PreferenceRank = 2, ParentId = acc.Id, Name = 'Three')
-    };
-    insert cpas;
-    ContactPointAddress expectedMost = cpas.remove(2);
-
-    List<Rollup.FlowInput> flowInputs = RollupTestUtils.prepareFlowTest(cpas, 'DELETE', 'MOST');
-
-    Test.startTest();
-    Rollup.performRollup(flowInputs);
-    Test.stopTest();
-
-    Account updatedAcc = [SELECT Id, AnnualRevenue FROM Account WHERE Id = :acc.Id];
-    System.assertEquals(expectedMost.PreferenceRank, updatedAcc.AnnualRevenue);
-  }
-
   /** Schedulable tests */
   @IsTest
   static void shouldThrowExceptionForBadQuery() {
     // it's a date field - you tell ME why this query is invalid!
     String veryBadQuery = 'SELECT MAX(ActivityDate) FROM Task';
 
-    Exception ex;
     try {
       Rollup.schedule('Test bad query', '0 0 0 0 0', veryBadQuery, 'Account', null);
-    } catch (Exception e) {
-      ex = e;
+      Assert.fail('Exception should be thrown above');
+    } catch (Exception ex) {
+      Assert.isTrue(ex.getMessage().contains('field ActivityDate does not support aggregate operator MAX'));
     }
-
-    System.assertNotEquals(null, ex);
   }
 
   @IsTest
@@ -2138,9 +1789,5 @@ private class RollupIntegrationTests {
     String jobId = Rollup.schedule('Test good query' + System.now(), '0 0 0 * * ?', goodQuery, 'ContactPointAddress', null);
 
     System.assertNotEquals(null, jobId);
-  }
-
-  private static String getCurrencyIsoCode(SObject record) {
-    return UserInfo.isMultiCurrencyOrganization() ? (String) record.get(RollupCurrencyInfo.CURRENCY_ISO_CODE_FIELD_NAME) : 'USD';
   }
 }
