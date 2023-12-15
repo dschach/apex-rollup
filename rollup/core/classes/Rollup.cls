@@ -43,6 +43,7 @@ global without sharing virtual class Rollup implements RollupLogger.ToStringObje
   protected Rollup__mdt metadata;
   protected Boolean isFullRecalc = false;
   protected Boolean isNoOp;
+  protected Boolean isNoOpOverridden = false;
   protected Boolean isCDCUpdate = false;
   protected Integer queryCount;
   protected RollupCalcItemReplacer calcItemReplacer;
@@ -704,7 +705,11 @@ global without sharing virtual class Rollup implements RollupLogger.ToStringObje
     global transient List<SObject> recordsToRollup = new List<SObject>();
     @InvocableVariable(label='Prior records to rollup' description='The old version of the records for update/upsert')
     global transient List<SObject> oldRecordsToRollup = new List<SObject>();
-
+    @InvocableVariable(
+      label='Parent Record Id for Empty Children Collections'
+      description='Runs rollup calculations even if no matching children when passed. Must also fill out Child Object Type When Rollup Started From Parent property'
+    )
+    global Id parentRecordIdForEmptyChildrenCollections;
     @InvocableVariable(
       label='Should rollup to ultimate hierarchy parent'
       description='Used in conjunction with Ultimate Parent Field to drive hierarchical parent rollups'
@@ -738,13 +743,18 @@ global without sharing virtual class Rollup implements RollupLogger.ToStringObje
     private final FlowInput flowInput;
     private final String rollupContext;
     private final SObjectType sObjectType;
-    private final Set<Rollup__mdt> rollupMetadata;
+    private final Set<Rollup__mdt> rollupMetadata = new Set<Rollup__mdt>();
+    private final Map<Id, SObject> children = new Map<Id, SObject>();
+    private final Map<Id, SObject> oldChildren = new Map<Id, SObject>();
+    private final Boolean shouldOverrideNoOp;
 
-    private FlowInputWrapper(FlowInput flowInput, String rollupContext, SObjectType sObjectType, Rollup__mdt meta) {
+    private FlowInputWrapper(FlowInput flowInput, String rollupContext, SObjectType sObjectType) {
       this.flowInput = flowInput;
       this.rollupContext = rollupContext;
       this.sObjectType = sObjectType;
-      this.rollupMetadata = new Set<Rollup__mdt>{ meta };
+      this.shouldOverrideNoOp =
+        this.flowInput.parentRecordIdForEmptyChildrenCollections != null &&
+        this.flowInput.calcItemTypeWhenRollupStartedFromParent != null;
     }
   }
 
@@ -770,6 +780,17 @@ global without sharing virtual class Rollup implements RollupLogger.ToStringObje
 
       flowInput.rollupOperation = flowInput.rollupOperation.toUpperCase();
       RollupLogger.Instance.log('processing invocable data:', flowInput, LoggingLevel.INFO);
+
+      if (
+        flowInput.parentRecordIdForEmptyChildrenCollections != null &&
+        flowInput.calcItemTypeWhenRollupStartedFromParent != null &&
+        flowInput.recordsToRollup?.isEmpty() == true
+      ) {
+        Schema.DescribeSObjectResult childDescribe = RollupFieldInitializer.Current.getDescribeFromName(flowInput.calcItemTypeWhenRollupStartedFromParent);
+        SObject stubChild = childDescribe.getSObjectType().newSObject(childDescribe.getKeyPrefix() + '0'.repeat(12));
+        stubChild.put(flowInput.lookupFieldOnCalcItem, flowInput.parentRecordIdForEmptyChildrenCollections);
+        flowInput.recordsToRollup.add(stubChild);
+      }
 
       if (flowInput.recordsToRollup?.isEmpty() != false) {
         flowOutput.message = 'No records to rollup, returning early';
@@ -797,17 +818,14 @@ global without sharing virtual class Rollup implements RollupLogger.ToStringObje
         if (shouldSkipRollupForFlow(meta, rollupContext)) {
           continue;
         }
-        if (metaToInputWrapper.containsKey(meta)) {
-          FlowInputWrapper wrapper = metaToInputWrapper.get(meta);
-          if (wrapper.rollupMetadata.contains(meta)) {
-            wrapper.flowInput.recordsToRollup.addAll(flowInput.recordsToRollup);
-            wrapper.flowInput.oldRecordsToRollup.addAll(flowInput.oldRecordsToRollup);
-          } else {
-            wrapper.rollupMetadata.add(meta);
-          }
-        } else {
-          metaToInputWrapper.put(meta, new FlowInputWrapper(flowInput, rollupContext, sObjectType, meta));
+        FlowInputWrapper wrapper = metaToInputWrapper.get(meta);
+        if (wrapper == null) {
+          wrapper = new FlowInputWrapper(flowInput, rollupContext, sObjectType);
+          metaToInputWrapper.put(meta, wrapper);
         }
+        wrapper.children.putAll(flowInput.recordsToRollup);
+        wrapper.oldChildren.putAll(flowInput.oldRecordsToRollup);
+        wrapper.rollupMetadata.add(meta);
       }
     }
     if (metaToInputWrapper.isEmpty()) {
@@ -819,32 +837,33 @@ global without sharing virtual class Rollup implements RollupLogger.ToStringObje
     Map<SObjectType, List<Rollup>> localRollups = new Map<SObjectType, List<Rollup>>();
     Map<Integer, List<SObject>> hashCodeToCalcItems = new Map<Integer, List<SObject>>();
     Map<SObjectType, RollupMetadata> typeToWrappedMeta = new Map<SObjectType, RollupMetadata>();
-    for (Rollup__mdt key : metaToInputWrapper.keySet()) {
-      FlowInputWrapper wrapper = metaToInputWrapper.get(key);
-      if (wrapper == null) {
-        continue;
-      }
+    for (FlowInputWrapper wrapper : metaToInputWrapper.values()) {
       // here we clone the list because it can get winnowed in "processCustomMetadata"
       List<Rollup__mdt> metas = new List<Rollup__mdt>(wrapper.rollupMetadata);
       Map<Schema.SObjectType, List<Rollup>> typeToWinnowedRollups;
-      wrapper.flowInput.recordsToRollup = replaceFlowInputCalcItemsIfNecessary(hashCodeToCalcItems, wrapper.flowInput.recordsToRollup, metas);
-      wrapper.flowInput.oldRecordsToRollup = replaceFlowInputCalcItemsIfNecessary(hashCodeToCalcItems, wrapper.flowInput.oldRecordsToRollup, metas);
-      Map<Id, SObject> oldFlowRecords = RollupFieldInitializer.Current.createSafeMap(wrapper.flowInput.oldRecordsToRollup);
+      List<SObject> children = wrapper.children.values();
+      wrapper.flowInput.recordsToRollup = replaceFlowInputCalcItemsIfNecessary(hashCodeToCalcItems, children, metas);
+      Map<Id, SObject> oldFlowRecords = RollupFieldInitializer.Current.createSafeMap(
+        replaceFlowInputCalcItemsIfNecessary(hashCodeToCalcItems, wrapper.oldChildren.values(), metas)
+      );
 
       if (wrapper.flowInput.deferProcessing) {
         typeToWinnowedRollups = new Map<Schema.SObjectType, List<Rollup>>{ wrapper.sObjectType => new List<Rollup>() };
       }
 
-      processCustomMetadata(
-        typeToWinnowedRollups != null ? typeToWinnowedRollups : localRollups,
-        metas,
-        wrapper.flowInput.recordsToRollup,
-        oldFlowRecords,
-        new Set<String>(),
-        wrapper.rollupContext,
-        fromInvocable,
-        typeToWrappedMeta
-      );
+      Map<Schema.SObjectType, List<Rollup>> typeToLocalRollups = typeToWinnowedRollups != null ? typeToWinnowedRollups : localRollups;
+      processCustomMetadata(typeToLocalRollups, metas, children, oldFlowRecords, new Set<String>(), wrapper.rollupContext, fromInvocable, typeToWrappedMeta);
+
+      if (wrapper.shouldOverrideNoOp) {
+        List<Rollup> rollups = typeToLocalRollups.get(wrapper.sObjectType);
+        if (rollups != null) {
+          for (Rollup roll : rollups) {
+            roll.isNoOp = false;
+            roll.isNoOpOverridden = true;
+            roll.calcItems = children;
+          }
+        }
+      }
 
       if (typeToWinnowedRollups != null) {
         for (Schema.SObjectType typeKey : typeToWinnowedRollups.keyset()) {
@@ -853,7 +872,7 @@ global without sharing virtual class Rollup implements RollupLogger.ToStringObje
       }
 
       if (metas.isEmpty() == false) {
-        Rollup rollupConductor = getRollup(metas, wrapper.sObjectType, wrapper.flowInput.recordsToRollup, oldFlowRecords, null, fromInvocable);
+        Rollup rollupConductor = getRollup(metas, wrapper.sObjectType, children, oldFlowRecords, null, fromInvocable);
         String logMessage = 'adding invocable rollup to list:';
         if (wrapper.flowInput.deferProcessing) {
           logMessage = 'deferring processing for rollup:';
@@ -2094,9 +2113,7 @@ global without sharing virtual class Rollup implements RollupLogger.ToStringObje
           meta,
           query + (String.isNotBlank(meta.CalcItemWhereClause__c) ? ' AND ' + meta.CalcItemWhereClause__c : '')
         );
-        if (rollups.containsKey(calcItemSObjectType)) {
-          rollups.get(calcItemSObjectType).clear();
-        }
+        rollups.get(calcItemSObjectType)?.clear();
         wrappedMeta.recordIds.addAll(queryWrapper.recordIds);
         wrappedMeta.typeToOldIntermediateParents.putAll(queryWrapper.typeToOldIntermediateParents);
         if (wrappedMeta.recordIds.isEmpty() == false) {
@@ -2126,7 +2143,7 @@ global without sharing virtual class Rollup implements RollupLogger.ToStringObje
     // collapse delete/full recalc operations
     for (String deleteKey : deleteKeyToReparentOp.keySet()) {
       DeleteReparentOperation deleteReparentOp = deleteKeyToReparentOp.get(deleteKey);
-      SObjectType deleteSObjectType = deleteReparentOp.reparentedRecords.getSObjectType();
+      Schema.SObjectType deleteSObjectType = deleteReparentOp.reparentedRecords[0].getSObjectType();
       Rollup deleteProcessor = getRollup(
         deleteReparentOp.rollupMetas,
         deleteSObjectType,
@@ -2747,6 +2764,7 @@ global without sharing virtual class Rollup implements RollupLogger.ToStringObje
         }
       }
     }
+
     RollupAsyncProcessor rollupConductor = RollupAsyncProcessor.getConductor(rollupInvokePoint, calcItems, oldCalcItems);
     if (rollupOperations.isEmpty() || calcItems.isEmpty()) {
       return rollupConductor;

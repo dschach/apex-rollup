@@ -136,16 +136,27 @@ public without sharing abstract class RollupEvaluator implements Rollup.Evaluato
   }
 
   private abstract class WhereCondition implements RollupLogger.ToStringObject {
-    protected Boolean isNegated = false;
-
-    public virtual Boolean isNegatedConditional() {
-      return this.isNegated;
-    }
     public virtual Boolean isOrConditional() {
       return false;
     }
     public abstract Boolean matches(Object calcItem);
     public abstract override String toString();
+  }
+
+  private class NegatedCondition extends WhereCondition {
+    private final WhereCondition innerCondition;
+
+    public NegatedCondition(WhereCondition innerCondition) {
+      this.innerCondition = innerCondition;
+    }
+
+    public override Boolean matches(Object item) {
+      return !this.innerCondition.matches(item);
+    }
+
+    public override String toString() {
+      return NegatedCondition.class.getName() + '\nNegated condition: ' + this.innerCondition;
+    }
   }
 
   private virtual class ConditionalGrouping extends WhereCondition {
@@ -164,23 +175,15 @@ public without sharing abstract class RollupEvaluator implements Rollup.Evaluato
           if (isEqual) {
             break;
           }
-        } else {
-          if (isEqual == false) {
-            break;
-          }
+        } else if (isEqual == false) {
+          break;
         }
       }
-      return this.isNegated ? !isEqual : isEqual;
+      return isEqual;
     }
 
     public override String toString() {
-      return ConditionalGrouping.class.getName() +
-        '\nIs Or Conditional: ' +
-        this.isOrConditional() +
-        '\nInner conditions: ' +
-        this.innerConditions +
-        '\nIs negated: ' +
-        this.isNegated;
+      return ConditionalGrouping.class.getName() + '\nIs Or Conditional: ' + this.isOrConditional() + '\nInner conditions: ' + this.innerConditions;
     }
   }
 
@@ -209,7 +212,7 @@ public without sharing abstract class RollupEvaluator implements Rollup.Evaluato
           }
         }
       }
-      return this.isNegated ? !isEqual : isEqual;
+      return isEqual;
     }
   }
 
@@ -259,7 +262,6 @@ public without sharing abstract class RollupEvaluator implements Rollup.Evaluato
         for (Integer index = 0; index < this.whereConditions.size(); index++) {
           WhereCondition condition = this.whereConditions[index];
           Boolean hasInnerMatch = condition.matches(calcItem);
-          addLog(condition, hasInnerMatch, calcItem, LoggingLevel.FINEST);
           if (condition.isOrConditional()) {
             matches = index == 0 ? hasInnerMatch : hasInnerMatch || matches;
           } else {
@@ -362,11 +364,11 @@ public without sharing abstract class RollupEvaluator implements Rollup.Evaluato
             }
           }
           List<WhereCondition> innerConditions = this.recursivelyCreateConditions(word);
-          ConditionalGrouping grouping = isOrConditional
-            ? (ConditionalGrouping) new OrConditionalGrouping(innerConditions)
-            : (ConditionalGrouping) new ConditionalGrouping(innerConditions);
-          grouping.isNegated = isNegated;
-          conditionals.add(grouping);
+          WhereCondition condition = isOrConditional ? new OrConditionalGrouping(innerConditions) : new ConditionalGrouping(innerConditions);
+          if (isNegated) {
+            condition = new NegatedCondition(condition);
+          }
+          conditionals.add(condition);
           continue;
         }
 
@@ -416,8 +418,7 @@ public without sharing abstract class RollupEvaluator implements Rollup.Evaluato
           isOrConditional = nextToken.equalsIgnoreCase('or');
         }
         simpleCondition.isOrConditional = isOrConditional;
-        simpleCondition.isNegated = isNegated;
-        conditionals.add(simpleCondition);
+        conditionals.add(isNegated ? new NegatedCondition(simpleCondition) : (WhereCondition) simpleCondition);
       }
 
       return conditionals;
@@ -675,9 +676,6 @@ public without sharing abstract class RollupEvaluator implements Rollup.Evaluato
           }
         }
       }
-      if (this.isNegatedConditional()) {
-        isEqual = !isEqual;
-      }
       CACHED_WHERE_DECISIONS.put(decisionKey, isEqual);
       return isEqual;
     }
@@ -855,14 +853,14 @@ public without sharing abstract class RollupEvaluator implements Rollup.Evaluato
         SObject calcItem = (SObject) item;
         RecursiveTracker recursionTracker = OPERATION_TO_RECURSION_TRACKER.get(this.metadataKey);
         RollupRecursionItem rollupItem = new RollupRecursionItem(calcItem, this.metadata, recursionTracker.stackCount);
+        Boolean hasSeenItemPreviously = recursionTracker?.recursionItems.contains(rollupItem) == true;
 
-        if (recursionTracker?.recursionItems.contains(rollupItem) == false) {
+        if (hasSeenItemPreviously == false) {
           recursionTracker.recursionItems.add(rollupItem);
-        } else if (recursionTracker != null && recursionTracker.stackCount > 0 && recursionTracker.recursionItems.contains(rollupItem)) {
+        } else if (recursionTracker != null && recursionTracker.stackCount > 0 && hasSeenItemPreviously) {
           matches = false;
         }
       }
-      addLog(this, matches, item, LoggingLevel.FINEST);
 
       return matches;
     }
