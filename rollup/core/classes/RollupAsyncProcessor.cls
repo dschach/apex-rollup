@@ -26,8 +26,6 @@ global virtual without sharing class RollupAsyncProcessor extends Rollup impleme
   @TestVisible
   private static List<SObject> stubParentRecords;
   @TestVisible
-  private static Boolean shouldRunAsBatch = false;
-  @TestVisible
   private static Integer additionalCalcItemCount;
   private static Boolean hasAlreadyAsyncEnqueued = false;
 
@@ -295,11 +293,6 @@ global virtual without sharing class RollupAsyncProcessor extends Rollup impleme
         this.logger.log('finished sync rollups', System.LoggingLevel.INFO);
       }
       if (this.rollups.isEmpty() == false || this instanceof RollupFullRecalcProcessor) {
-        Integer totalCountOfRecords = this.getLookupRecordsCount(this.rollups);
-        shouldRunAsBatch =
-          shouldRunAsBatch ||
-          (this.rollupControl.ShouldRunAs__c == RollupMetaPicklists.ShouldRunAs.Batchable &&
-          totalCountOfRecords >= this.rollupControl.MaxLookupRowsBeforeBatching__c);
         rollupProcessId = this.getAsyncRollup()?.beginAsyncRollup();
       }
     }
@@ -313,8 +306,12 @@ global virtual without sharing class RollupAsyncProcessor extends Rollup impleme
 
   protected virtual RollupRepository preStart() {
     this.winnowRollups(this.rollups);
+    String equality = '!=';
+    if (this.childToUnexpectedFullRecalc.isEmpty() == false) {
+      equality = '=';
+    }
     this.populateObjectFields(this.rollups);
-    String query = 'SELECT Id FROM Organization WHERE Name != \'' + UserInfo.getOrganizationName() + '\'';
+    String query = 'SELECT Id FROM Organization WHERE Name ' + equality + '\'' + UserInfo.getOrganizationName() + '\'';
     RollupRepository repo = new RollupRepository(this.runAsMode);
     if (this.rollups.isEmpty() == false) {
       RollupAsyncProcessor firstRollup = this.rollups.get(0);
@@ -350,6 +347,10 @@ global virtual without sharing class RollupAsyncProcessor extends Rollup impleme
   }
 
   protected RollupAsyncProcessor getAsyncRollup() {
+    Integer totalCountOfRecords = this.getLookupRecordsCount(this.rollups);
+    Boolean shouldRunAsBatch =
+      this.rollupControl.ShouldRunAs__c == RollupMetaPicklists.ShouldRunAs.Batchable ||
+      totalCountOfRecords >= this.rollupControl.MaxLookupRowsBeforeBatching__c;
     // swap off on which async process is running to achieve infinite scaling
     Boolean canEnqueue = this.getCanEnqueue();
     RollupAsyncProcessor roll;
@@ -527,6 +528,12 @@ global virtual without sharing class RollupAsyncProcessor extends Rollup impleme
         }
       }
       this.fullRecalcProcessor?.processParentFieldsToReset(recordsToReset);
+      Map<Id, SObject> idToLookupItem = new Map<Id, SObject>(lookupItemsToAssign);
+      for (SObject recordToReset : recordsToReset) {
+        if (idToLookupItem.containsKey(recordToReset.Id) == false && roll.lookupObj == recordToReset.getSObjectType()) {
+          lookupItemsToAssign.add(recordToReset);
+        }
+      }
     }
     return lookupItemsToAssign;
   }
@@ -549,7 +556,7 @@ global virtual without sharing class RollupAsyncProcessor extends Rollup impleme
       // calling clear in a loop here might look interesting - and it would be a massive problem if not for the
       // bag only responding to the very first clear() invocation. everything after that is a no-op (so, any rollup with more
       // than one rollup operation going at a time)
-      if (rollup.triggerContext == System.TriggerOperation.BEFORE_DELETE) {
+      if (rollup.triggerContext == System.TriggerOperation.BEFORE_DELETE || rollup.op.name().contains('DELETE')) {
         bag.clear();
       }
     }
@@ -637,6 +644,8 @@ global virtual without sharing class RollupAsyncProcessor extends Rollup impleme
         } else {
           this.cachedQueryToAdditionalCalcItems.put(cachedQueryKey, additionalCalcItems);
         }
+      } else {
+        this.cachedQueryToAdditionalCalcItems.put(cachedQueryKey, new List<SObject>());
       }
     }
 
@@ -762,6 +771,16 @@ global virtual without sharing class RollupAsyncProcessor extends Rollup impleme
     return Limits.getLimitQueueableJobs() > Limits.getQueueableJobs();
   }
 
+  protected Object getDefaultValue(Rollup__mdt meta) {
+    Object resetVal = null;
+    if (meta.FullRecalculationDefaultNumberValue__c != null) {
+      resetVal = meta.FullRecalculationDefaultNumberValue__c;
+    } else if (meta.FullRecalculationDefaultStringValue__c != null) {
+      resetVal = meta.FullRecalculationDefaultStringValue__c;
+    }
+    return resetVal;
+  }
+
   private void storeParentResetField(String lookupField, SObject parent) {
     String resetKey = String.valueOf(parent.get(lookupField));
     if (resetKey != null) {
@@ -810,8 +829,7 @@ global virtual without sharing class RollupAsyncProcessor extends Rollup impleme
       } else if (rollup.getTypeName() == RollupFullBatchRecalculator.class.getName()) {
         rollupsToProcess.remove(index);
         RollupFullBatchRecalculator fullRecalc = (RollupFullBatchRecalculator) rollup;
-        Schema.SObjectType childType = fullRecalc.getCalcItemType();
-        this.childToUnexpectedFullRecalc.put(childType, fullRecalc);
+        this.childToUnexpectedFullRecalc.put(fullRecalc.getCalcItemType(), fullRecalc);
       }
     }
     rollupsToProcess.addAll(this.transformFullRecalcRollups());
@@ -918,6 +936,9 @@ global virtual without sharing class RollupAsyncProcessor extends Rollup impleme
     List<SObject> localLookupItems = new List<SObject>();
     Set<String> lookupItemKeys = new Set<String>(calcItemsByLookupField.keySet());
     this.previouslyResetParents.retainAll(lookupItemKeys);
+    if (this.fullRecalcProcessor != null) {
+      lookupItemKeys.addAll(this.fullRecalcProcessor.getRecordIdentifiers());
+    }
     for (String lookupId : calcItemsByLookupField.keySet()) {
       if (updatedLookupRecords.containsKey(lookupId)) {
         lookupItemKeys.remove(lookupId);
@@ -926,20 +947,12 @@ global virtual without sharing class RollupAsyncProcessor extends Rollup impleme
         localLookupItems.add(updatedLookupObject);
       }
     }
-    localLookupItems.addAll(roll.getExistingLookupItems(lookupItemKeys, roll, this.lookupObjectToUniqueFieldNames.get(roll.lookupObj)));
+    localLookupItems.addAll(this.getExistingLookupItems(lookupItemKeys, roll, this.lookupObjectToUniqueFieldNames.get(roll.lookupObj)));
     return localLookupItems;
   }
 
   private void populateOtherDeferredRollups() {
-    RollupFullRecalcProcessor firstFullRecalc;
-    for (Integer index = 0; index < this.childToUnexpectedFullRecalc.values().size(); index++) {
-      RollupFullRecalcProcessor fullRecalc = this.childToUnexpectedFullRecalc.values()[index];
-      if (index == 0) {
-        firstFullRecalc = fullRecalc;
-      } else {
-        firstFullRecalc.addCaboose(fullRecalc);
-      }
-    }
+    RollupFullRecalcProcessor firstFullRecalc = this.loadCabooses();
     if (firstFullRecalc != null) {
       this.deferredRollups.add(firstFullRecalc);
     }
@@ -950,6 +963,18 @@ global virtual without sharing class RollupAsyncProcessor extends Rollup impleme
       }
       this.getCachedRollups().clear();
     }
+  }
+
+  private RollupFullRecalcProcessor loadCabooses() {
+    RollupFullRecalcProcessor firstFullRecalc;
+    for (RollupFullRecalcProcessor fullRecalc : this.childToUnexpectedFullRecalc.values()) {
+      if (firstFullRecalc == null) {
+        firstFullRecalc = fullRecalc;
+      } else {
+        firstFullRecalc.addCaboose(fullRecalc);
+      }
+    }
+    return firstFullRecalc;
   }
 
   private void processDeferredRollups() {
@@ -970,19 +995,23 @@ global virtual without sharing class RollupAsyncProcessor extends Rollup impleme
     Boolean isDeferralAllowed = this.getIsDeferralAllowed() && isAllowedToContinue;
     this.stackDepth++;
     this.setIsDeferralAllowed(this.rollupControl.MaxRollupRetries__c > stackDepth);
-    this.rollups.clear();
     this.isTimingOut = false;
     this.lookupObjectToUniqueFieldNames = null;
     this.calcObjectToUniqueFieldNames = null;
 
     if (isDeferralAllowed) {
+      this.rollups.clear();
       this.rollups.addAll(this.deferredRollups);
+      this.deferredRollups.clear();
       this.logger.log('deferred rollups remaining:', this.rollups, LoggingLevel.INFO);
       this.getAsyncRollup()?.beginAsyncRollup();
+      // for synchronous runs with a timeout, we need to ensure this.rollups is re-cleared here
+      // to prevent re-running through the same logic in runCalc()
+      this.rollups.clear();
     } else if (this.rollups.isEmpty() == false) {
       this.logger.log('deferral was explicitly disallowed for rollups:', this.rollups, LoggingLevel.ERROR);
+      this.deferredRollups.clear();
     }
-    this.deferredRollups.clear();
   }
 
   private void setupCalcItemData(Rollup roll) {
@@ -1174,7 +1203,7 @@ global virtual without sharing class RollupAsyncProcessor extends Rollup impleme
         // downstream; for our purposes, it isn't useful to try to get all of the records while
         // we're still in a sync context
         continue;
-      } else if (roll.calcItems?.isEmpty() == true) {
+      } else if (roll.calcItems?.isEmpty() != false) {
         continue;
       }
 
@@ -1253,6 +1282,9 @@ global virtual without sharing class RollupAsyncProcessor extends Rollup impleme
           calc = this.getCalculator(calc, roll, bag, lookupRecord, priorValToUse, key, roll.lookupFieldOnCalcItem);
           this.conditionallyPerformUpdate(priorVal, calc, lookupRecord, roll, recordsToUpdate, ParentUpdateType.LOOKUP, localCalcItems);
         }
+      } else {
+        this.logger.log('About to reset parent field for', lookupRecord, System.LoggingLevel.DEBUG);
+        this.getDML().updateField(roll.opFieldOnLookupObject, lookupRecord, this.getDefaultValue(roll.metadata));
       }
     }
 

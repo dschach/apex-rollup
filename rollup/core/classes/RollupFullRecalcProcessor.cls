@@ -87,6 +87,10 @@ global abstract without sharing class RollupFullRecalcProcessor extends RollupAs
     }
   }
 
+  public Set<String> getRecordIdentifiers() {
+    return new Set<String>(this.recordIds);
+  }
+
   public void trackParentRecord(SObject parent) {
     this.postProcessor?.recordIds.add(parent.Id);
   }
@@ -134,7 +138,7 @@ global abstract without sharing class RollupFullRecalcProcessor extends RollupAs
   protected List<RollupAsyncProcessor> getDelegatedFullRecalcRollups(List<SObject> calcItems) {
     for (Schema.SObjectType intermediateGrandparent : this.getOldIntermediateGrandparents().keySet()) {
       for (Id resetId : this.getOldIntermediateGrandparents().get(intermediateGrandparent)) {
-        this.parentRecordsToClear.put(resetId, resetId.getSobjectType().newSObject(resetId));
+        this.parentRecordsToClear.put(resetId, resetId.getSObjectType().newSObject(resetId));
       }
     }
     RollupAsyncProcessor processor = this.getAsyncRollup(this.rollupMetas, this.calcItemType, calcItems, new Map<Id, SObject>(), null, this.invokePoint);
@@ -162,7 +166,7 @@ global abstract without sharing class RollupFullRecalcProcessor extends RollupAs
   protected override Boolean getCanRollupWithoutCustomSetting() {
     Boolean canRollupWithoutCustomSetting = false;
     for (Rollup__mdt rollupMeta : this.rollupMetas) {
-      canRollupWithoutCustomSetting = rollupMeta.ShouldRunWithoutCustomSettingEnabled__c == true;
+      canRollupWithoutCustomSetting = rollupMeta.ShouldRunWithoutCustomSettingEnabled__c;
       // all included rollups need to have the override enabled; if even one does NOT, we can stop
       if (canRollupWithoutCustomSetting == false) {
         break;

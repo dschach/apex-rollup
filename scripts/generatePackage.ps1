@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 . .\scripts\string-utils.ps1
 
 function Get-SFDX-Project-JSON {
-  Get-Content -Path ./sfdx-project.json | ConvertFrom-Json
+  Get-Content -Path ./sfdx-project.json | ConvertFrom-Json | Select-Object -Property * -ExcludeProperty target-dev-hub
 }
 
 $sfdxProjectJsonPath = "./sfdx-project.json"
@@ -147,7 +147,7 @@ function Generate() {
   if ($null -eq $currentPackageVersionId) {
     throw $createPackageResult
   } else {
-    npx sfdx bummer:package:aliases:sort
+    npx sf bummer package aliases sort
     git add $sfdxProjectJsonPath -f
   }
 
