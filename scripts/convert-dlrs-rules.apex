@@ -4,13 +4,10 @@
 static final RollupControl__mdt ROLLUP_CONTROL = RollupControl__mdt.getInstance('Org_Defaults');
 
 // Prepare the converted Rollup__mdt CMDT records for deployment
-String customMetadataTypePrefix = Schema.Rollup__mdt.SObjectType.getDescribe().getName().replace('__mdt', '');
+String customMetadataTypePrefix = Schema.Rollup__mdt.SObjectType.toString().replace('__mdt', '');
 Metadata.DeployContainer deployment = new Metadata.DeployContainer();
 
-// Field/Entity Definition particles in CMDT don't currently support these three objects
-// so we'll print out the info necessary to set up invocables for them if there are any matching DLRS rules
-// for those objects
-List<String> invalidChildren = new List<String>{ 'Event', 'Task', 'User' };
+List<String> objectsUnsupportedUsingEntityDefinition = new List<String>{ 'Event', 'Task', 'User' };
 List<Map<String, String>> unmigrateableRules = new List<Map<String, String>>();
 Boolean shouldDeploy = false;
 
@@ -43,79 +40,67 @@ for (dlrs__LookupRollupSummary2__mdt dlrsRule : dlrs__LookupRollupSummary2__mdt.
     }
   }
 
-  if (invalidChildren.contains(dlrsRule.dlrs__ChildObject__c)) {
-    // build up a list of unmigrateable rules to assist with the creation of the flow actions
+  Schema.SObjectField calcObject = Rollup__mdt.CalcItem__c;
+  Schema.SObjectField lookupFieldCalcItem = Rollup__mdt.LookupFieldOnCalcItem__c;
+  Schema.SObjectField lookupFieldParent = Rollup__mdt.LookupFieldOnLookupObject__c;
+  Schema.SObjectField lookupObject = Rollup__mdt.LookupObject__c;
+  Schema.SObjectField rollupFieldCalcItem = Rollup__mdt.RollupFieldOnCalcItem__c;
+  Schema.SObjectField rollupFieldParent = Rollup__mdt.RollupFieldOnLookupObject__c;
 
-    Map<String, String> unmigratableRule = new Map<String, String>();
-    unmigratableRule.put('Action label', customMetadata.label);
-    unmigratableRule.put(
-      'Records to rollup',
-      'Provide the collection of rollup records (if the rollup starts from parent records, set Is Rollup Started From Parent to {!$GlobalConstant.True})'
-    );
-    unmigratableRule.put(
-      'Prior records to rollup',
-      'A collection variable with {!$Record__Prior} in it, when using after update or after create and update flows'
-    );
-    unmigratableRule.put('Object for \"Prior records to rollup\" and \"Records to rollup\"', dlrsRule.dlrs__ChildObject__c);
-
-    unmigratableRule.put('Child Object Calc Field', dlrsRule.dlrs__FieldToAggregate__c);
-    unmigratableRule.put('Child Object Lookup Field', dlrsRule.dlrs__RelationshipField__c);
-    unmigratableRule.put('Rollup Object API Name', dlrsRule.dlrs__ParentObject__c);
-    unmigratableRule.put('Rollup Object Calc Field', dlrsRule.dlrs__AggregateResultField__c);
-    unmigratableRule.put('Rollup Object Lookup Field', 'Id');
-    unmigratableRule.put('Rollup Operation', operation.toUpperCase());
-    unmigratableRule.put('Rollup Operation Context', 'INSERT / UPDATE / UPSERT / DELETE: see README for more info');
-    if (operation.startsWith('CONCAT')) {
-      unmigratableRule.put('Concat Delimiter', dlrsRule.dlrs__ConcatenateDelimiter__c);
-    }
-    if (dlrsRule.dlrs__FieldToOrderBy__c != null) {
-      unmigratableRule.put('Order By (First/Last)', dlrsRule.dlrs__FieldToOrderBy__c);
-    }
-    if (dlrsRule.dlrs__RelationshipCriteria__c != null) {
-      unmigratableRule.put('SOQL Where Clause To Exclude Calc Items', dlrsRule.dlrs__RelationshipCriteria__c);
-    }
-    unmigrateableRules.add(unmigratableRule);
-  } else {
-    // This code uses instances of Metadata.CustomMetadataValue for the deployment - not instances of Rollup__mdt
-    // So, use a map & field tokens to store the expected values - Salesforce will store the data as Rollup__mdt records when deployed
-    Map<String, Object> fieldValuesToCopy = new Map<String, Object>{
-      Schema.Rollup__mdt.CalcItem__c.getDescribe().getName() => dlrsRule.dlrs__ChildObject__c,
-      Schema.Rollup__mdt.CalcItemWhereClause__c.getDescribe().getName() => dlrsRule.dlrs__RelationshipCriteria__c,
-      Schema.Rollup__mdt.ConcatDelimiter__c.getDescribe().getName() => operation.startsWith('CONCAT') ? dlrsRule.dlrs__ConcatenateDelimiter__c : null,
-      Schema.Rollup__mdt.Description__c.getDescribe().getName() => dlrsRule.dlrs__Description__c,
-      Schema.Rollup__mdt.LimitAmount__c.getDescribe().getName() => dlrsRule.dlrs__RowLimit__c,
-      Schema.Rollup__mdt.LookupFieldOnCalcItem__c.getDescribe().getName() => dlrsRule.dlrs__RelationshipField__c,
-      Schema.Rollup__mdt.LookupFieldOnLookupObject__c.getDescribe().getName() => 'Id',
-      Schema.Rollup__mdt.LookupObject__c.getDescribe().getName() => dlrsRule.dlrs__ParentObject__c,
-      Schema.Rollup__mdt.OrderByFirstLast__c.getDescribe().getName() => dlrsRule.dlrs__FieldToOrderBy__c,
-      Schema.Rollup__mdt.RollupControl__c.getDescribe().getName() => ROLLUP_CONTROL.DeveloperName,
-      Schema.Rollup__mdt.RollupFieldOnCalcItem__c.getDescribe().getName() => dlrsRule.dlrs__FieldToAggregate__c,
-      Schema.Rollup__mdt.RollupFieldOnLookupObject__c.getDescribe().getName() => dlrsRule.dlrs__AggregateResultField__c,
-      Schema.Rollup__mdt.RollupOperation__c.getDescribe().getName() => operation.toUpperCase(),
-      Schema.Rollup__mdt.SharingMode__c.getDescribe().getName() => dlrsRule.dlrs__CalculationSharingMode__c
-
-      // Additional DLRS fields that are not supported/used by Rollup
-      // dlrs__AggregateAllRows__c
-      // dlrs__CalculationMode__c
-      // dlrs__RelationshipCriteriaFields__c
-    };
-
-    // Create the instance of Metadata.CustomMetadataValue for the current DLRS rule
-    for (String fieldName : fieldValuesToCopy.keySet()) {
-      Metadata.CustomMetadataValue customField = new Metadata.CustomMetadataValue();
-      customField.field = fieldName;
-      if (fieldName == Schema.Rollup__mdt.Description__c.getDescribe().getName()) {
-        customField.value = 'Generated by migration script:\n' + fieldValuesToCopy.get(fieldName);
-      } else {
-        customField.value = fieldValuesToCopy.get(fieldName);
-      }
-
-      customMetadata.values.add(customField);
-    }
-
-    shouldDeploy = true;
-    deployment.addMetadata(customMetadata);
+  if (
+    objectsUnsupportedUsingEntityDefinition.contains(dlrsRule.dlrs__ChildObject__c) ||
+    objectsUnsupportedUsingEntityDefinition.contains(dlrsRule.dlrs__ParentObject__c)
+  ) {
+    calcObject = Rollup__mdt.CalcItemText__c;
+    lookupFieldCalcItem = Rollup__mdt.LookupFieldOnCalcItemText__c;
+    lookupFieldParent = Rollup__mdt.LookupFieldOnLookupObjectText__c;
+    lookupObject = Rollup__mdt.LookupObjectText__c;
+    rollupFieldCalcItem = Rollup__mdt.RollupFieldOnCalcItemText__c;
+    rollupFieldParent = Rollup__mdt.RollupFieldOnLookupObjectText__c;
   }
+
+  if (dlrsRule.dlrs__ConcatenateDelimiter__c?.equalsIgnoreCase('BR()') == true) {
+    dlrsRule.dlrs__ConcatenateDelimiter__c = '\n';
+  }
+  // This code uses instances of Metadata.CustomMetadataValue for the deployment - not instances of Rollup__mdt
+  // So, use a map & field tokens to store the expected values - Salesforce will store the data as Rollup__mdt records when deployed
+  Map<String, Object> fieldValuesToCopy = new Map<String, Object>{
+    calcObject.toString() => dlrsRule.dlrs__ChildObject__c,
+    Schema.Rollup__mdt.CalcItemWhereClause__c.toString() => dlrsRule.dlrs__RelationshipCriteria__c,
+    Schema.Rollup__mdt.ConcatDelimiter__c.toString() => operation.startsWith('CONCAT') ? dlrsRule.dlrs__ConcatenateDelimiter__c : null,
+    Schema.Rollup__mdt.Description__c.toString() => dlrsRule.dlrs__Description__c,
+    Schema.Rollup__mdt.LimitAmount__c.toString() => dlrsRule.dlrs__RowLimit__c,
+    lookupFieldCalcItem.toString() => dlrsRule.dlrs__RelationshipField__c,
+    lookupFieldParent.toString() => 'Id',
+    lookupObject.toString() => dlrsRule.dlrs__ParentObject__c,
+    Schema.Rollup__mdt.OrderByFirstLast__c.toString() => dlrsRule.dlrs__FieldToOrderBy__c,
+    Schema.Rollup__mdt.RollupControl__c.toString() => ROLLUP_CONTROL.DeveloperName,
+    rollupFieldCalcItem.toString() => dlrsRule.dlrs__FieldToAggregate__c,
+    rollupFieldParent.toString() => dlrsRule.dlrs__AggregateResultField__c,
+    Schema.Rollup__mdt.RollupOperation__c.toString() => operation.toUpperCase(),
+    Schema.Rollup__mdt.SharingMode__c.toString() => dlrsRule.dlrs__CalculationSharingMode__c
+
+    // Additional DLRS fields that are not supported/used by Rollup
+    // dlrs__AggregateAllRows__c
+    // dlrs__CalculationMode__c
+    // dlrs__RelationshipCriteriaFields__c
+  };
+
+  // Create the instance of Metadata.CustomMetadataValue for the current DLRS rule
+  for (String fieldName : fieldValuesToCopy.keySet()) {
+    Metadata.CustomMetadataValue customField = new Metadata.CustomMetadataValue();
+    customField.field = fieldName;
+    if (fieldName == Schema.Rollup__mdt.Description__c.toString()) {
+      customField.value = 'Generated by migration script:\n' + (fieldValuesToCopy.get(fieldName) ?? '(no description on DLRS rule)');
+    } else {
+      customField.value = fieldValuesToCopy.get(fieldName);
+    }
+
+    customMetadata.values.add(customField);
+  }
+
+  shouldDeploy = true;
+  deployment.addMetadata(customMetadata);
 }
 
 if (shouldDeploy) {
@@ -123,16 +108,7 @@ if (shouldDeploy) {
   System.debug(LoggingLevel.INFO, 'Deployment metadata:\n' + JSON.serialize(deployment));
   Id jobId = Metadata.Operations.enqueueDeployment(deployment, null);
   System.debug(LoggingLevel.INFO, 'Deployment Job ID: ' + jobId);
+  System.debug(LoggingLevel.INFO, 'All DLRS rules were deployed as Rollup metadata - check the Deploy Status page in Setup for more info');
 } else {
   System.debug(LoggingLevel.INFO, 'No DLRS rules to migrate, skipping metadata deploy');
-}
-
-if (unmigrateableRules.isEmpty() == false) {
-  // Debug the information necessary for rules that couldn't be created due to lack of support for certain objects
-  System.debug(LoggingLevel.INFO, 'The following DLRS rules could not be migrated, please create Rollup flow actions for them!');
-  for (Map<String, String> unmigrateableRule : unmigrateableRules) {
-    System.debug(LoggingLevel.INFO, JSON.serializePretty(unmigrateableRule));
-  }
-} else {
-  System.debug(LoggingLevel.INFO, 'All DLRS rules were migrated to Rollup metadata successfully');
 }

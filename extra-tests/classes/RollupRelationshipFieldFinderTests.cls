@@ -1,6 +1,8 @@
 @IsTest
 private class RollupRelationshipFieldFinderTests {
+  @SuppressWarnings('PMD.FieldNamingConventions')
   static final RollupControl__mdt control = new RollupControl__mdt(MaxLookupRowsBeforeBatching__c = 10000);
+  @SuppressWarnings('PMD.FieldNamingConventions')
   static final Set<String> uniqueFieldNames = new Set<String>{ 'Id', 'Name' };
 
   @TestSetup
@@ -134,6 +136,29 @@ private class RollupRelationshipFieldFinderTests {
 
     System.assertEquals(true, traversal.getParentLookupToRecords().containsKey(acc.OwnerId));
     System.assertEquals(acc.Owner.Name, traversal.retrieveParents(con.Id)[0].get('Name'));
+    System.assertEquals(true, traversal.getIsFinished());
+  }
+
+  @IsTest
+  static void fullRecalcDoesNotBlowUpOnDynamicParentFields() {
+    Account acc = [SELECT Id, OwnerId, Owner.Name FROM Account];
+
+    ContactPointAddress child = new ContactPointAddress(ParentId = acc.Id, Name = 'Child');
+    insert child;
+
+    RollupRelationshipFieldFinder finder = new RollupRelationshipFieldFinder(
+      control,
+      new Rollup__mdt(GrandparentRelationshipFieldPath__c = 'Parent.Owner.Name'),
+      new Set<String>{ 'ParentId, Name' },
+      uniqueFieldNames,
+      User.SObjectType,
+      new Map<Id, SObject>()
+    );
+    finder.setIsFullRecalc(true);
+    RollupRelationshipFieldFinder.Traversal traversal = finder.getParents(new List<ContactPointAddress>{ child });
+
+    System.assertEquals(true, traversal.getParentLookupToRecords().containsKey(acc.OwnerId));
+    System.assertEquals(acc.Owner.Name, traversal.retrieveParents(child.Id)[0].get('Name'));
     System.assertEquals(true, traversal.getIsFinished());
   }
 

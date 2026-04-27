@@ -3,8 +3,7 @@ private class InvocableDrivenTests {
   @TestSetup
   static void setup() {
     upsert new RollupSettings__c(IsEnabled__c = true);
-    Account acc = new Account(Name = InvocableDrivenTests.class.getName());
-    insert acc;
+    insert new Account(Name = InvocableDrivenTests.class.getName());
   }
 
   @IsTest
@@ -43,7 +42,7 @@ private class InvocableDrivenTests {
 
   @IsTest
   static void shouldWorkWhenBatchedFromRefresh() {
-    Rollup.defaultControl = new RollupControl__mdt(MaxLookupRowsBeforeBatching__c = 1, IsRollupLoggingEnabled__c = true);
+    Rollup.defaultControl = new RollupControl__mdt(MaxLookupRowsBeforeBatching__c = 1);
     // Driven by extra-tests/flows/Rollup_Integration_Multiple_Deferred_Case_Rollups.flow-meta.xml
     Account acc = [SELECT Id FROM Account];
     // Description and Subject both are referenced in the Flow
@@ -181,5 +180,53 @@ private class InvocableDrivenTests {
 
     parent = [SELECT AnnualRevenue FROM Account WHERE Id = :parent.Id];
     System.assertEquals(null, parent.AnnualRevenue);
+  }
+
+  @IsTest
+  static void refreshWorksWithEmptyCollectionsWhenParentIdIsProvided() {
+    Account acc = [SELECT Id FROM Account];
+    ContactPointAddress child = new ContactPointAddress(Name = 'RollupIntegrationRefresh', PreferenceRank = 99, ParentId = acc.Id);
+    insert child;
+
+    Flow.Interview flowInterview = new Flow.Interview.Rollup_Integration_Refresh_With_Empty_Collections(
+      new Map<String, Object>{ 'parentRecordIdForEmptyChildrenCollections' => acc.Id }
+    );
+
+    Test.startTest();
+    flowInterview.start();
+    Test.stopTest();
+
+    acc = [SELECT AnnualRevenue FROM Account WHERE Id = :acc.Id];
+    System.assertEquals(child.PreferenceRank, acc.AnnualRevenue);
+  }
+
+  @IsTest
+  static void orderBysRetainRanking() {
+    RollupParent__c parent = new RollupParent__c(Name = 'Parent');
+    insert parent;
+
+    RollupChild__c childOne = new RollupChild__c(
+      RollupParent__c = parent.Id,
+      NumberField__c = 1,
+      TextField__c = 'b',
+      Id = RollupTestUtils.createId(RollupChild__c.SObjectType)
+    );
+    RollupChild__c childTwo = new RollupChild__c(
+      RollupParent__c = parent.Id,
+      NumberField__c = 1,
+      TextField__c = 'a',
+      Id = RollupTestUtils.createId(RollupChild__c.SObjectType)
+    );
+
+    Flow.Interview flowInterview = new Flow.Interview.Rollup_Integration_Rollup_Order_Bys(
+      new Map<String, Object>{ 'rollupChildren' => new List<RollupChild__c>{ childOne, childTwo } }
+    );
+
+    Test.startTest();
+    flowInterview.start();
+    Test.stopTest();
+
+    parent = [SELECT TextField__c FROM RollupParent__c WHERE Id = :parent.Id];
+    System.assertEquals(childTwo.TextField__c, parent.TextField__c);
   }
 }

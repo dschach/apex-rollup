@@ -19,3 +19,6 @@ sfge-*.log.gz
 #OSX
 .DS_Store
 .config
+.vscode
+config/data/act-pr-event.json
+.sflogsub

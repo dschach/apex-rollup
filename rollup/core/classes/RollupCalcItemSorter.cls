@@ -33,16 +33,13 @@ public without sharing class RollupCalcItemSorter implements System.Comparator<S
 
   private List<RollupOrderBy__mdt> initializeOrderByOptions(List<RollupOrderBy__mdt> orderByOptions) {
     for (RollupOrderBy__mdt orderByOption : orderByOptions) {
-      if (orderByOption.NullSortOrder__c == null) {
-        orderByOption.NullSortOrder__c = RollupMetaPicklists.NullSortOrder.NullsFirst;
-      }
-      if (orderByOption.SortOrder__c == null) {
-        orderByOption.SortOrder__c = RollupMetaPicklists.SortOrder.Ascending;
-      }
+      orderByOption.NullSortOrder__c = orderByOption.NullSortOrder__c ?? RollupMetaPicklists.NullSortOrder.NullsFirst;
+      orderByOption.SortOrder__c = orderByOption.SortOrder__c ?? RollupMetaPicklists.SortOrder.Ascending;
     }
     return orderByOptions;
   }
 
+  @SuppressWarnings('PMD.ExcessiveParameterList')
   private Integer getSortRanking(
     SObject objOne,
     SObject objTwo,
@@ -76,7 +73,7 @@ public without sharing class RollupCalcItemSorter implements System.Comparator<S
       String firstVal = (String) potentialFirstVal;
       String secondVal = (String) potentialSecondVal;
 
-      if (picklistController.isPicklist() || picklistController.isMultiSelectPicklist()) {
+      if ((picklistController.isPicklist() || picklistController.isMultiSelectPicklist()) && orderByOption.ShouldOverridePicklistOrdering__c != true) {
         sortRanking = picklistController.isTrueFor(firstVal, secondVal, Rollup.Op.MIN) ? -1 : 1;
       } else {
         sortRanking = this.getSortOrder(firstVal > secondVal, orderByOption);

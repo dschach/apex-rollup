@@ -1,3 +1,4 @@
+@SuppressWarnings('PMD.ExcessiveParameterList,PMD.NcssTypeCount')
 public without sharing abstract class RollupEvaluator implements Rollup.Evaluator, RollupLogger.ToStringObject {
   private static final String RELATIONSHIP_FIELD_DELIMITER = '\\.';
   private static final String TRUE_VAL = 'true';
@@ -8,13 +9,13 @@ public without sharing abstract class RollupEvaluator implements Rollup.Evaluato
   private static String stubRequestId;
 
   private static final Map<String, WhereFieldEvaluator> CACHED_WHERE_EVALS = new Map<String, WhereFieldEvaluator>();
+  @SuppressWarnings('PMD.FieldNamingConventions')
   private static Map<String, Boolean> CACHED_WHERE_DECISIONS = new Map<String, Boolean>();
 
+  @SuppressWarnings('PMD.PropertyNamingConventions')
   private static Map<String, RecursiveTracker> OPERATION_TO_RECURSION_TRACKER {
     get {
-      if (OPERATION_TO_RECURSION_TRACKER == null) {
-        OPERATION_TO_RECURSION_TRACKER = new Map<String, RecursiveTracker>();
-      }
+      OPERATION_TO_RECURSION_TRACKER = OPERATION_TO_RECURSION_TRACKER ?? new Map<String, RecursiveTracker>();
       return OPERATION_TO_RECURSION_TRACKER;
     }
     private set;
@@ -126,7 +127,7 @@ public without sharing abstract class RollupEvaluator implements Rollup.Evaluato
           }
         }
       }
-      addLog(this, matches, calcItem, LoggingLevel.FINEST);
+      addLog(this, matches, calcItem, System.LoggingLevel.FINEST);
       return matches;
     }
 
@@ -226,22 +227,20 @@ public without sharing abstract class RollupEvaluator implements Rollup.Evaluato
 
     private final Map<String, Schema.SObjectField> fieldNameToField {
       get {
-        if (this.fieldNameToField == null) {
-          this.fieldNameToField = this.calcItemType.getDescribe(Schema.SObjectDescribeOptions.DEFERRED).fields.getMap();
-        }
+        this.fieldNameToField = this.fieldNameToField ?? this.calcItemType.getDescribe(Schema.SObjectDescribeOptions.DEFERRED).fields.getMap();
         return this.fieldNameToField;
       }
       set;
     }
 
     public WhereFieldEvaluator(String whereClause, SObjectType calcItemSObjectType) {
-      whereClause = whereClause == null ? '' : whereClause.replaceAll('(\n|\r|\t)', ' ');
+      whereClause = whereClause?.replaceAll('(\n|\r|\t)', ' ') ?? '';
       this.whereClause = whereClause;
       this.calcItemType = calcItemSObjectType;
       this.validRelationshipNames = this.getValidRelationshipNames(calcItemSObjectType);
       this.createConditions(calcItemSObjectType, whereClause);
-      RollupLogger.Instance.log('where clause for eval: ' + this.whereClause, LoggingLevel.FINER);
-      RollupLogger.Instance.log('conditionals', this.whereConditions, LoggingLevel.FINER);
+      RollupLogger.Instance.log('where clause for eval: ' + this.whereClause, System.LoggingLevel.FINER);
+      RollupLogger.Instance.log('conditionals', this.whereConditions, System.LoggingLevel.FINER);
     }
 
     public override String toString() {
@@ -286,7 +285,7 @@ public without sharing abstract class RollupEvaluator implements Rollup.Evaluato
           (field.getDescribe().getReferenceTo().size() < 2 ||
           POLYMORPHIC_FIELDS.contains(relationshipName) == false))
         ) {
-          localRelationshipNames.add(relationshipName);
+          localRelationshipNames.add(relationshipName.toLowerCase());
         }
       }
       return localRelationshipNames;
@@ -296,7 +295,7 @@ public without sharing abstract class RollupEvaluator implements Rollup.Evaluato
       try {
         this.whereConditions.addAll(this.recursivelyCreateConditions(localWhereClause));
       } catch (Exception ex) {
-        RollupLogger.Instance.log('an error occurred in RollupEvaluator:', ex, LoggingLevel.ERROR);
+        RollupLogger.Instance.log('an error occurred in RollupEvaluator:', ex, System.LoggingLevel.ERROR);
         RollupLogger.Instance.save();
         throw new IllegalArgumentException(
           'Where clause entered incorrectly: ' + whereClause + '\nException: ' + ex.getMessage() + '\n' + ex.getStackTraceString()
@@ -304,6 +303,7 @@ public without sharing abstract class RollupEvaluator implements Rollup.Evaluato
       }
     }
 
+    @SuppressWarnings('PMD.AvoidDeeplyNestedIfStmts')
     private List<WhereCondition> recursivelyCreateConditions(String localWhereClause) {
       if (localWhereClause.startsWith('(') && localWhereClause.endsWith(')')) {
         localWhereClause = localWhereClause.substring(1, localWhereClause.length() - 1);
@@ -393,9 +393,19 @@ public without sharing abstract class RollupEvaluator implements Rollup.Evaluato
           }
         }
         String value = words[++index];
-        if (criteria.endsWithIgnoreCase('in')) {
+        if (value.endsWith(':') && index == words.size() - 2) {
+          value += ' ' + words[++index];
+        }
+        if (criteria.endsWithIgnoreCase('in') || criteria.endsWithIgnoreCase('includes')) {
           while (value.endsWith(')') == false) {
-            value += ' ' + words[++index];
+            String nextWord = words[++index];
+            value += ' ' + nextWord;
+            if (index + 1 == words.size()) {
+              break;
+            }
+          }
+          if (value.startsWith('(') && value.endsWith(')') == false) {
+            value += ')';
           }
         } else if (value.startsWith('\'') && value.endsWith('\'') == false) {
           String tempVal = value;
@@ -438,7 +448,7 @@ public without sharing abstract class RollupEvaluator implements Rollup.Evaluato
       if (
         hasRelationshipField &&
         condition.fieldName.contains('__c.') == false &&
-        this.validRelationshipNames.contains(condition.fieldName.substringBefore('.')) &&
+        this.validRelationshipNames.contains(condition.fieldName.substringBefore('.').toLowerCase()) &&
         this.isValidRelationshipField(condition.fieldName)
       ) {
         this.queryFields.add(condition.fieldName);
@@ -476,29 +486,7 @@ public without sharing abstract class RollupEvaluator implements Rollup.Evaluato
         return false;
       }
       List<String> fieldParts = fieldName.split(RELATIONSHIP_FIELD_DELIMITER);
-      if (fieldName.contains('Owner.')) {
-        Integer ownerIndex = fieldParts.indexOf('Owner');
-        Schema.SObjectType ownerType;
-        if (ownerIndex > 0) {
-          Integer index = 0;
-          while (index < ownerIndex) {
-            String relationshipName = fieldParts[index];
-            String fieldRef = getRelationshipNameFromField(relationshipName);
-            SObjectField fieldToken = this.fieldNameToField.get(fieldRef);
-            if (fieldToken.getDescribe().isNamePointing()) {
-              return false;
-            }
-            ownerType = fieldToken.getDescribe().getReferenceTo()[0];
-            index++;
-          }
-        } else {
-          ownerType = this.calcItemType;
-        }
-        return (ownerType == this.calcItemType ? this.fieldNameToField : ownerType.getDescribe().fields.getMap())
-            .get('OwnerId')
-            .getDescribe()
-            .isNamePointing() == false;
-      } else {
+      if (fieldName.contains('Owner.') == false) {
         Map<String, Schema.SObjectField> localFieldNameToField = this.fieldNameToField;
         while (fieldParts.size() > 1) {
           String relationshipPart = fieldParts.remove(0);
@@ -514,6 +502,23 @@ public without sharing abstract class RollupEvaluator implements Rollup.Evaluato
         String endPart = fieldParts[0];
         return localFieldNameToField.containsKey(endPart);
       }
+      Schema.SObjectType ownerType = this.calcItemType;
+      Integer ownerIndex = fieldParts.indexOf('Owner');
+      if (ownerIndex > 0) {
+        Integer index = 0;
+        while (index < ownerIndex) {
+          String relationshipName = fieldParts[index];
+          String fieldRef = getRelationshipNameFromField(relationshipName);
+          SObjectField fieldToken = this.fieldNameToField.get(fieldRef);
+          if (fieldToken.getDescribe().isNamePointing()) {
+            return false;
+          }
+          ownerType = fieldToken.getDescribe().getReferenceTo()[0];
+          index++;
+        }
+      }
+      return (ownerType == this.calcItemType ? this.fieldNameToField : ownerType.getDescribe().fields.getMap()).get('OwnerId').getDescribe().isNamePointing() ==
+        false;
     }
   }
 
@@ -581,8 +586,9 @@ public without sharing abstract class RollupEvaluator implements Rollup.Evaluato
     @SuppressWarnings('PMD.EmptyCatchBlock')
     public override Boolean matches(Object o) {
       String decisionKey = this.fieldName + this.criteria + this.originalValues + o.hashCode();
-      if (CACHED_WHERE_DECISIONS.containsKey(decisionKey)) {
-        return CACHED_WHERE_DECISIONS.get(decisionKey);
+      Boolean possiblePriorMatchOutcome = CACHED_WHERE_DECISIONS.get(decisionKey);
+      if (possiblePriorMatchOutcome != null) {
+        return possiblePriorMatchOutcome;
       }
 
       SObject item = (SObject) o;
@@ -592,7 +598,7 @@ public without sharing abstract class RollupEvaluator implements Rollup.Evaluato
 
       String fieldNameToUse = isDateFunction ? getDateFunctionField(this.fieldName) : this.fieldName;
       Object originalValue = this.getFieldValue(item, fieldNameToUse, this.fieldNameToTokens);
-      String storedValue = originalValue == null ? (String) originalValue : String.valueOf(originalValue);
+      String recordValue = originalValue == null ? (String) originalValue : String.valueOf(originalValue);
 
       if (hasOnlyOneValue && isDateFunction) {
         isEqual = RollupDateLiteral.getFunction(this.fieldName, this.originalValues[0]).matches(originalValue, this.criteria);
@@ -607,7 +613,7 @@ public without sharing abstract class RollupEvaluator implements Rollup.Evaluato
               Decimal decimalVal = Decimal.valueOf(stringVal);
               if (decimalVal == originalValue) {
                 originalValue = decimalVal;
-                storedValue = stringVal;
+                recordValue = stringVal;
                 break;
               }
             } catch (Exception ex) {
@@ -625,10 +631,10 @@ public without sharing abstract class RollupEvaluator implements Rollup.Evaluato
               criteria = '!=';
             }
             if (this.hasValues == false) {
-              isEqual = String.isBlank(storedValue);
+              isEqual = String.isBlank(recordValue);
             } else {
               for (String value : this.values) {
-                isEqual = value?.equalsIgnoreCase(storedValue) == true || value == null && storedValue == null;
+                isEqual = value?.equalsIgnoreCase(recordValue) == true || value == null && recordValue == null;
                 if (isEqual) {
                   break;
                 }
@@ -638,24 +644,29 @@ public without sharing abstract class RollupEvaluator implements Rollup.Evaluato
           }
           when 'like', 'not like' {
             isEqual = false;
-            if (storedValue == null) {
+            if (recordValue == null) {
               return false;
             }
-            storedValue = storedValue.toLowerCase();
-            String val = this.values[0].toLowerCase();
+            recordValue = recordValue.toLowerCase();
+            String evalValue = this.values[0].toLowerCase();
 
-            if (val.contains('%')) {
+            if (evalValue.contains('%')) {
               // % as a wildcard can be read as either:
               // "any character till the next match sequence, or no character till the next match"
-              isEqual = storedValue.replaceAll(val.replace('%', '(.+|)'), '') == '';
+              String replaced = recordValue.replaceAll(evalValue.replace('%', '(.+|)'), '');
+              String evaluationWithoutWildcard = evalValue.replace('%', '');
+              isEqual =
+                replaced == '' ||
+                evalValue.endsWith('%') && recordValue.startsWith(evaluationWithoutWildcard) ||
+                evalValue.startsWith('%') && recordValue.endsWith(evaluationWithoutWildcard);
             } else {
-              isEqual = storedValue.equals(val);
+              isEqual = recordValue.equals(evalValue);
             }
 
             isEqual = criteria == 'like' ? isEqual : isEqual == false;
           }
           when '>', '>=', '<', '<=' {
-            if (storedValue == null) {
+            if (recordValue == null) {
               isEqual = false;
             } else {
               isEqual = this.getGreaterOrLessThan(this.values[0], originalValue);
@@ -664,9 +675,9 @@ public without sharing abstract class RollupEvaluator implements Rollup.Evaluato
           when 'includes', '!includes' {
             isEqual = false;
             for (String value : this.values) {
-              List<String> splitValues = value.split(';');
+              List<String> splitValues = value?.split(';') ?? new List<String>();
               for (String splitValue : splitValues) {
-                isEqual = storedValue.containsIgnoreCase(splitValue);
+                isEqual = recordValue?.containsIgnoreCase(splitValue) == true;
                 if (isEqual == false) {
                   break;
                 }
@@ -870,14 +881,14 @@ public without sharing abstract class RollupEvaluator implements Rollup.Evaluato
     return relationshipField.endsWith('__r') ? relationshipField.substringBeforeLast('__r') + '__c' : relationshipField + 'Id';
   }
 
-  private static void addLog(RollupLogger.ToStringObject clazz, Boolean matches, Object item, LoggingLevel logLevel) {
+  private static void addLog(RollupLogger.ToStringObject clazz, Boolean matches, Object item, System.LoggingLevel logLevel) {
     if (matches == false) {
       RollupLogger.Instance.log('Removing non-match for: ' + item, clazz, logLevel);
     }
   }
 
   private static String getCurrentTransactionId() {
-    return stubRequestId != null ? stubRequestId : Request.getCurrent().getRequestId();
+    return stubRequestId ?? Request.getCurrent().getRequestId();
   }
 
   private static String getDateFunctionField(String field) {

@@ -1,11 +1,11 @@
 public without sharing class RollupLogEventHandler {
-  @SuppressWarnings('PMD.ApexCrudViolation')
+  @SuppressWarnings('PMD.ApexCRUDViolation')
   public void handle(List<RollupLogEvent__e> logEvents) {
     Map<String, RollupLog__c> transactionIdToLogs = new Map<String, RollupLog__c>();
 
     for (RollupLogEvent__e logEvent : logEvents) {
       RollupLog__c rollupLog = new RollupLog__c(
-        ErrorWouldHaveBeenThrown__c = logEvent.LoggingLevel__c == LoggingLevel.ERROR.name(),
+        ErrorWouldHaveBeenThrown__c = logEvent.LoggingLevel__c == System.LoggingLevel.ERROR.name(),
         LoggedBy__c = Id.valueOf(logEvent.LoggedBy__c),
         TransactionId__c = logEvent.TransactionId__c
       );

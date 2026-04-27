@@ -2,38 +2,32 @@ public without sharing class RollupLimits {
   @TestVisible
   private static Integer stubbedQueryRows;
   @TestVisible
-  private static Integer orgAsyncJobsUsed;
+  private static Integer currentAsyncJobsUsed;
   @TestVisible
   private static Integer stubAsyncTimeoutInterval;
 
   private static final Integer SYNC_TIMEOUT_INTERVAL_MS = 1500;
-  private static final Integer LIMIT_HEAP_SIZE = Limits.getLimitHeapSize();
   private static final Integer LIMIT_QUERY_ROWS = 50000;
 
+  @SuppressWarnings('PMD.PropertyNamingConventions')
   private static final Integer ASYNC_TIMEOUT_INTERVAL_MS {
     get {
-      if (ASYNC_TIMEOUT_INTERVAL_MS == null) {
-        ASYNC_TIMEOUT_INTERVAL_MS = stubAsyncTimeoutInterval == null ? 13000 : stubAsyncTimeoutInterval;
-      }
+      ASYNC_TIMEOUT_INTERVAL_MS = ASYNC_TIMEOUT_INTERVAL_MS ?? stubAsyncTimeoutInterval ?? 13000;
       return ASYNC_TIMEOUT_INTERVAL_MS;
     }
     set;
   }
 
+  @SuppressWarnings('PMD.PropertyNamingConventions')
   private static final Boolean HAS_EXCEEDED_ORG_ASYNC_JOB_LIMIT {
     get {
-      Integer countOfJobsUsed = 0;
       Integer asyncJobLimit = 250000;
-      // at the moment, packaging orgs run tests synchronously, which produces an error when fetching System.OrgLimits.getMap()
-      // this is a workaround until it's safe to access OrgLimits from a synchronously running test
-      if (HAS_EXCEEDED_ORG_ASYNC_JOB_LIMIT == null && orgAsyncJobsUsed == null) {
-        System.OrgLimit asyncLimit = System.OrgLimits.getMap().get('DailyAsyncApexExecutions');
-        asyncJobLimit = asyncLimit.getLimit();
-        countOfJobsUsed = asyncLimit.getValue();
-      } else if (HAS_EXCEEDED_ORG_ASYNC_JOB_LIMIT == null) {
-        countOfJobsUsed = orgAsyncJobsUsed;
+      if (HAS_EXCEEDED_ORG_ASYNC_JOB_LIMIT == null) {
+        System.OrgLimit asyncOrgLimit = System.OrgLimits.getMap().get('DailyAsyncApexExecutions');
+        asyncJobLimit = asyncOrgLimit.getLimit();
+        Integer countOfJobsUsed = currentAsyncJobsUsed ?? asyncOrgLimit.getValue();
+        HAS_EXCEEDED_ORG_ASYNC_JOB_LIMIT = countOfJobsUsed - asyncJobLimit > 0;
       }
-      HAS_EXCEEDED_ORG_ASYNC_JOB_LIMIT = countOfJobsUsed - asyncJobLimit > 0;
       return HAS_EXCEEDED_ORG_ASYNC_JOB_LIMIT;
     }
     set;
@@ -42,55 +36,41 @@ public without sharing class RollupLimits {
   public class Tester {
     private final transient RollupControl__mdt control;
     private final transient Boolean isRunningAsync;
+    private final Boolean hasExceededOverallLimits;
+
+    public final Boolean hasExceededQueryNumberLimit;
+    public final Boolean hasExceededQueryRowLimit;
+    public final Boolean hasExceededDMLRowLimit;
+    public final Boolean hasExceededCPUTimeLimit;
+
+    @SuppressWarnings('PMD.AvoidBooleanMethodParameters')
     public Tester(RollupControl__mdt control, Boolean isRunningAsync) {
       this.control = control;
       this.isRunningAsync = isRunningAsync;
+      this.hasExceededQueryNumberLimit = this.control?.MaxNumberOfQueries__c < Limits.getQueries();
+      this.hasExceededQueryRowLimit = this.getRemainingQueryRows() < 0;
+      this.hasExceededDMLRowLimit = this.control?.MaxParentRowsUpdatedAtOnce__c < Limits.getDmlRows();
+
+      Integer intervalTillTimeout = this.isRunningAsync ? ASYNC_TIMEOUT_INTERVAL_MS : SYNC_TIMEOUT_INTERVAL_MS;
+      this.hasExceededCPUTimeLimit = (Limits.getCpuTime() + intervalTillTimeout) >= Limits.getLimitCpuTime();
+      this.hasExceededOverallLimits =
+        this.hasExceededQueryNumberLimit ||
+        this.hasExceededQueryRowLimit ||
+        this.hasExceededDMLRowLimit ||
+        this.hasExceededCPUTimeLimit;
     }
 
-    public Boolean hasExceededQueryNumberLimit {
-      get {
-        return this.control?.MaxNumberOfQueries__c < Limits.getQueries();
-      }
-    }
-    public Boolean hasExceededQueryRowLimit {
-      get {
-        return this.getRemainingQueryRows() < 0;
-      }
-    }
-    public Boolean hasExceededHeapSizeLimit {
-      get {
-        return (LIMIT_HEAP_SIZE - 2000000) < Limits.getHeapSize();
-      }
-    }
-    public Boolean hasExceededDMLRowLimit {
-      get {
-        return this.control?.MaxParentRowsUpdatedAtOnce__c < Limits.getDmlRows();
-      }
-    }
-    public Boolean hasExceededCPUTimeLimit {
-      get {
-        Integer intervalTillTimeout = this.isRunningAsync ? ASYNC_TIMEOUT_INTERVAL_MS : SYNC_TIMEOUT_INTERVAL_MS;
-        return (Limits.getCpuTime() + intervalTillTimeout) >= Limits.getLimitCpuTime();
-      }
+    public Boolean hasExceededLimits() {
+      return this.hasExceededOverallLimits;
     }
 
-    public transient Boolean hasExceededLimits {
-      get {
-        return this.hasExceededQueryNumberLimit ||
-          this.hasExceededQueryRowLimit ||
-          this.hasExceededHeapSizeLimit ||
-          this.hasExceededDMLRowLimit ||
-          this.hasExceededCPUTimeLimit;
-      }
-    }
-
-    public Integer getRemainingQueryRows() {
-      Integer queryRowsUsed = stubbedQueryRows != null ? stubbedQueryRows : Limits.getQueryRows();
-      if (this.control?.MaxQueryRows__c == null) {
-        return LIMIT_QUERY_ROWS - queryRowsUsed;
-      }
-      Integer remainingQueryRows = this.control.MaxQueryRows__c?.intValue() - queryRowsUsed;
-      return remainingQueryRows > 0 ? remainingQueryRows : 0;
+    public Decimal getRemainingQueryRows() {
+      Integer queryRowsUsed = stubbedQueryRows ?? Limits.getQueryRows();
+      Decimal maxQueryRows = this.control.MaxQueryRows__c != null &&
+        this.control.MaxQueryRows__c <= LIMIT_QUERY_ROWS
+        ? this.control.MaxQueryRows__c
+        : LIMIT_QUERY_ROWS;
+      return maxQueryRows - queryRowsUsed;
     }
 
     public Boolean hasExceededOrgAsyncLimit() {

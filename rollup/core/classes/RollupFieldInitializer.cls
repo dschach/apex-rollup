@@ -1,3 +1,4 @@
+@SuppressWarnings('PMD.CognitiveComplexity')
 public virtual class RollupFieldInitializer {
   public final Datetime defaultDateTime = Datetime.newInstanceGmt(1970, 1, 1);
   public final Long maximumLongValue = (Math.pow(2, 63) - 1).longValue();
@@ -5,9 +6,13 @@ public virtual class RollupFieldInitializer {
   public final Integer maximumIntegerValue = 2147483647;
   public final Integer minimumIntegerValue = -2147483647 - 1;
 
-  public static final RollupFieldInitializer Current = new RollupFieldInitializer();
-
-  private RollupFieldInitializer() {
+  @SuppressWarnings('PMD.PropertyNamingConventions')
+  public static final RollupFieldInitializer Current {
+    get {
+      Current = Current ?? new RollupFieldInitializer();
+      return Current;
+    }
+    private set;
   }
 
   public Datetime getApexCompliantDatetime(Datetime dt) {
@@ -15,7 +20,7 @@ public virtual class RollupFieldInitializer {
     return Datetime.newInstanceGmt(dt.yearGmt(), dt.monthGmt(), dt.dayGmt(), dt.hourGmt(), dt.minuteGmt(), dt.secondGmt());
   }
 
-  public virtual Object getDefaultValue(SObjectField field) {
+  public virtual Object getDefaultValue(Schema.SObjectField field) {
     DescribeFieldResult fieldDescribe = field.getDescribe();
     if (fieldDescribe.isDefaultedOnCreate() && fieldDescribe.getDefaultValue() != null) {
       return fieldDescribe.getDefaultValue();
@@ -55,7 +60,7 @@ public virtual class RollupFieldInitializer {
     return initializedDefault;
   }
 
-  public SObjectField getSObjectFieldByName(Map<String, SObjectField> fieldNameToField, String desiredField) {
+  public SObjectField getSObjectFieldByName(Map<String, Schema.SObjectField> fieldNameToField, String desiredField) {
     if (fieldNameToField.containsKey(desiredField)) {
       return fieldNameToField.get(desiredField);
     } else if (fieldNameToField.containsKey(desiredField + 'Id')) {
@@ -83,9 +88,9 @@ public virtual class RollupFieldInitializer {
     private List<String> activeVals;
     private Map<String, Integer> picklistToRank;
 
-    public PicklistController(DescribeFieldResult fieldDescribe) {
+    public PicklistController(Schema.DescribeFieldResult fieldDescribe) {
       super();
-      DisplayType fieldType = fieldDescribe?.getType();
+      Schema.DisplayType fieldType = fieldDescribe?.getType();
       this.isPicklist = fieldType == DisplayType.MULTIPICKLIST || fieldType == DisplayType.PICKLIST;
       this.isMultiSelectPicklist = fieldType == DisplayType.MULTIPICKLIST;
 
@@ -102,7 +107,7 @@ public virtual class RollupFieldInitializer {
         List<Schema.PicklistEntry> picklistVals = fieldDescribe.getPicklistValues();
 
         for (Integer index = 0; index < picklistVals.size(); index++) {
-          PicklistEntry picklist = picklistVals[index];
+          Schema.PicklistEntry picklist = picklistVals[index];
           this.doBookkeepingOnPicklist(picklist);
           // all inactive values will use -1 as a sentinel value
           picklistToRank.put(picklist.getValue(), picklist.isActive() ? index : -1);
@@ -110,7 +115,7 @@ public virtual class RollupFieldInitializer {
       }
     }
 
-    private void doBookkeepingOnPicklist(PicklistEntry picklist) {
+    private void doBookkeepingOnPicklist(Schema.PicklistEntry picklist) {
       if (picklist.isDefaultValue() && this.activeVals.isEmpty()) {
         this.activeVals.add(picklist.getValue());
       } else if (picklist.isActive()) {
@@ -118,7 +123,7 @@ public virtual class RollupFieldInitializer {
       }
     }
 
-    public override Object getDefaultValue(SObjectField field) {
+    public override Object getDefaultValue(Schema.SObjectField field) {
       return this.isPicklist == false ? super.getDefaultValue(field) : this.activeVals[0];
     }
 
@@ -160,18 +165,27 @@ public virtual class RollupFieldInitializer {
     }
   }
 
+  public class StringSorter implements System.Comparator<String> {
+    public Integer compare(String first, String second) {
+      return first.compareTo(second);
+    }
+  }
+
   private class PicklistSorter implements System.Comparator<String> {
     private final PicklistController picklistController;
+    private final System.Comparator<String> stringSorter = new StringSorter();
+
     public PicklistSorter(PicklistController picklistController) {
       this.picklistController = picklistController;
     }
+
     public Integer compare(String firstVal, String secondVal) {
       Integer sortValue = 0;
       Integer firstRank = this.picklistController.getRank(firstVal, Rollup.Op.FIRST);
       Integer secondRank = this.picklistController.getRank(secondVal, Rollup.Op.FIRST);
       if (firstRank == this.picklistController.minimumIntegerValue || secondRank == this.picklistController.minimumIntegerValue) {
         // fall back to standard sorting if sentinel value is returned
-        return firstVal.compareTo(secondVal);
+        sortValue = this.stringSorter.compare(firstVal, secondVal);
       } else if (firstRank > secondRank) {
         sortValue = 1;
       } else if (firstRank < secondRank) {

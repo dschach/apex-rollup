@@ -14,12 +14,12 @@ public class RollupTestUtils {
 
     Rollup.FlowInput flowInput = new Rollup.FlowInput();
     flowInput.recordsToRollup = records;
-    flowInput.lookupFieldOnCalcItem = ContactPointAddress.ParentId.getDescribe().getName();
-    flowInput.lookupFieldOnOpObject = Account.Id.getDescribe().getName();
+    flowInput.lookupFieldOnCalcItem = ContactPointAddress.ParentId.toString();
+    flowInput.lookupFieldOnOpObject = Account.Id.toString();
     flowInput.rollupContext = rollupContext;
-    flowInput.rollupFieldOnCalcItem = ContactPointAddress.PreferenceRank.getDescribe().getName();
-    flowInput.rollupFieldOnOpObject = Account.AnnualRevenue.getDescribe().getName();
-    flowInput.rollupSObjectName = Account.SObjectType.getDescribe(SObjectDescribeOptions.DEFERRED).getName();
+    flowInput.rollupFieldOnCalcItem = ContactPointAddress.PreferenceRank.toString();
+    flowInput.rollupFieldOnOpObject = Account.AnnualRevenue.toString();
+    flowInput.rollupSObjectName = Account.SObjectType.toString();
     flowInput.rollupOperation = rollupOperation;
     flowInput.splitConcatDelimiterOnCalcItem = false;
 
@@ -27,15 +27,16 @@ public class RollupTestUtils {
   }
 
   public class DMLMock extends RollupSObjectUpdater {
+    @SuppressWarnings('PMD.FieldNamingConventions')
     public List<SObject> Records = new List<SObject>();
     public override void doUpdate(List<SObject> recordsToUpdate) {
-      RollupLogger.Instance.log('mock received the following for update:', recordsToUpdate, LoggingLevel.DEBUG);
+      RollupLogger.Instance.log('mock received the following for update:', recordsToUpdate, System.LoggingLevel.DEBUG);
       this.Records = recordsToUpdate;
     }
   }
 
   public static DMLMock loadAccountIdMock(List<SObject> records) {
-    Account acc = [SELECT Id FROM Account];
+    Account acc = [SELECT Id FROM Account LIMIT 1];
     for (SObject record : records) {
       record.put('ParentId', acc.Id);
     }
@@ -52,9 +53,7 @@ public class RollupTestUtils {
 
   public static DMLMock loadMock(List<SObject> records) {
     for (SObject record : records) {
-      if (record.Id == null) {
-        record.Id = createId(record.getSObjectType());
-      }
+      record.Id = record.Id ?? createId(record.getSObjectType());
     }
     Rollup.records = records;
     Rollup.shouldRun = true;
@@ -95,7 +94,7 @@ public class RollupTestUtils {
     String currencyIscoCodeFieldName = RollupCurrencyInfo.CURRENCY_ISO_CODE_FIELD_NAME;
     Set<String> fieldNames = new Set<String>();
     for (Schema.SObjectField fieldToken : fieldTokens) {
-      fieldNames.add(fieldToken.getDescribe().getName());
+      fieldNames.add(fieldToken.toString());
     }
 
     if (fieldNames.contains('Name') == false) {
@@ -107,5 +106,13 @@ public class RollupTestUtils {
     String whereClause = recordId == null ? '' : '\nWHERE Id = :recordId';
     String recordQuery = 'SELECT ' + String.join(fieldNames, ', ') + '\nFROM ' + fromObject + whereClause;
     return Database.query(recordQuery);
+  }
+
+  public static String getNamespaceSafeClassName(Type intendedClass) {
+    List<String> classNameParts = intendedClass.getName().split('\\.');
+    if (classNameParts.size() > 1) {
+      classNameParts.remove(0);
+    }
+    return classNameParts[0];
   }
 }

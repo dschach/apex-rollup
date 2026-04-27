@@ -20,20 +20,17 @@ Read below for more on how you can use Apex Rollup in your day-to-day. Please no
 - [Rollup Control custom metadata configuration](https://youtu.be/vUP_uBB2m-k)
 - [Unit testing Apex Rollup](https://youtu.be/u7ly5xGMfFM)
 
-As well, don't miss [the Wiki](../../wiki), which includes even more info for common topics.
+As well, don't miss [the Wiki](../../wiki), which includes even more info for common topics like [setting up Task/Event/User rollups](../../wiki/Creating-Task-User-Event-Based-Rollups).
 
 ## Deployment & Setup
 
-<a href="https://login.salesforce.com/packaging/installPackage.apexp?p0=04t6g000008OaOuAAK">
-  <img alt="Deploy to Salesforce"
-       src="./media/deploy-package-to-prod.png">
+<a href="https://login.salesforce.com/packaging/installPackage.apexp?p0=04tg700000037wDAAQ">
+  <img alt="Deploy to Salesforce" src="./media/deploy-package-to-prod.png">
 </a>
 
-<a href="https://test.salesforce.com/packaging/installPackage.apexp?p0=04t6g000008OaOuAAK">
-  <img alt="Deploy to Salesforce Sandbox"
-       src="./media/deploy-package-to-sandbox.png">
+<a href="https://test.salesforce.com/packaging/installPackage.apexp?p0=04tg700000037wDAAQ">
+  <img alt="Deploy to Salesforce Sandbox" src="./media/deploy-package-to-sandbox.png">
 </a>
-
 <br/>
 <br/>
 
@@ -77,7 +74,7 @@ You have several different options when it comes to making use of Apex Rollup:
 
 ## CMDT-based Rollup Solution
 
-Custom Metadata Type (CMDT) records are the preferred way to configure and organize your rollups. There are some limitations to this approach, particularly for popular objects like Task and Event - expand the section below and navigate to the ["How To Configure Rollups When An Object Does Not Appear In The CMDT Dropdowns"](#taskeventuser-rollups---how-to-configure-rollups-when-an-object-does-not-appear-in-the-cmdt-dropdowns) section.
+Custom Metadata Type (CMDT) records are the preferred way to configure and organize your rollups. There are some limitations to this approach, particularly for popular objects like Task and Event - if you don't see the object you'd like to use in either the parent or child dropdown(s), use the "Text" version of that field (eg `Child Object (Text)`).
 
 <details>
     <summary>Expand for CMDT-driven info</summary>
@@ -133,6 +130,7 @@ Within the `Rollup__mdt` custom metadata type, add a new record with fields:
   - Both CONCAT and CONCAT_DISTINCT separate values with commas by default in the rollup field itself, but you can use `Concat Delimiter` to change that
   - CONCAT / CONCAT_DISTINCT / FIRST / LAST / MOST operations support the usage of `Rollup Order By` Custom Metadata to stipulate how to sort records, or how to sort the concatenated values. For MOST, using `Rollup Order By` CMDT allows you to dictate how a tiebreaker for rollup values with the most instances can be handled (should a tie occur occur).
 - `Rollup Control` - link to the Org Defaults for controlling rollups, or set a specific Rollup Control CMDT to be used with this rollup. Multiple rollups can be tied to one specific Control record, or simply use the Org Default record (included) for all of your rollups.
+- `Rollup Grouping` (optional) - lookup field to `RollupGrouping__mdt`, a parent-level CMDT record used when rolling values from two different children objects up to the same parent field
 - `Currency Field Mapping (Comma-separated)` (optional) - for organizations using Advanced Currency Management with Dated Exchange Rates, fill out this field if you are rolling up a currency field and you'd like to customize which field (or parent-level field) is used as the Date or Datetime to be matched with its corresponding Dated Exchange Rate. As an example, Opportunity Splits use `Opportunity,CloseDate` here by default - if you are using a parent-level field, the relationship name for it is the first value (thus, `Opportunity,CloseDate` is correct - `OpportunityId,CloseDate` would be incorrect).
 - `Concat Delimiter` (optional) - for `CONCAT` and `CONCAT_DISTINCT` operations, the delimiter used between text defaults to a comma (unless you are rolling up to a multi-select picklist, in which case it defaults to a semi-colon), but you can override the default delimiter here. At this time, only single character delimiters are supported - please file [an issue](/issues) if you are looking to use multi-character delimiters!
 - `Changed Fields On Child Object` (optional) - comma-separated list of field API Names to filter child records - only records where at least one of the fields listed has changed on an update will end up triggering a rollup. If you are using a `Child Object Where Clause`, I would not recommend using this field
@@ -147,6 +145,8 @@ Within the `Rollup__mdt` custom metadata type, add a new record with fields:
 - `Group By Fields (Comma-separated)` (optional) - filling this field out turns any existing rollup into a group by rollup using the API names of children-level fields as supplied. For example, you could turn a SUM-based rollup on Opportunity into a grouping rollup, supplying fields like `StageName, Name` to sum the rollup field on Opportunity and group the output by Stage and Name. Can be used in conjunction with the next fields, `Group By Row (Start/End) Delimiter`. For multi-currency orgs where you are rolling up currency fields affected by multi-currency, please read the advanced notes in the Multi-Currency section.
 - `Group By Row Start Delimiter` (optional) - if set, this is the delimiter which prefaces each row in the group by rollup to delimit results. Defaults to `•` if not supplied
 - `Group By Row End Delimiter` (optional) - if set, this is the delimiter which is appended to each row in the group by rollup to delimit results. Defaults to a new line character if not supplied. Please also note that different new line characters are required depending on what type of field you're rolling up to - `<br>` will work for Rich Text fields, for example, while `\n` is the way to enter new lines for long text areas
+- `Is Distinct` (optional, defaults to `false`) - de-duplicates the children item values for any parent prior to rolling them up
+- `Is Disabled` (optional, defaults to `false`) - toggle this to omit a rollup from being run without having to associate it with another Rollup Control record
 - `Is Full Record Set` (optional, defaults to `false`) - converts any rollup into a full recalculation (e.g. all _other_ child records associated with the parent(s) of the child records being passed in will be fetched and used in the rollup calculation)
 - `Is Rollup Started From Parent` (optional, defaults to `false`) - if the the records being passed in are the parent records, check this field off. Apex Rollup will then go and retrieve the assorted children records before rolling the values up to the parents. If you are using `Is Rollup Started From Parent` and grandparent rollups with Tasks/Events (or anything with a polymorphic relationship field like `Who` or `What` on Task/Event; the `Parent` field on `Contact Point Address` is another example of such a field), you **must** also include a filter for `What.Type` or `Who.Type` in your `Child Object Where Clause` in order to proceed, e.g. `What.Type = 'Account'`.
 - `Is Table Formatted` (optional, defaults to `false`) - set this to true _instead of_ using the `Group By Row Start Delimiter` and `Group By Row End Delimiter` if you are rolling up to a rich text field and you want the output to be a table.
@@ -171,13 +171,6 @@ In addition to the above, some other considerations when it comes to the where c
 
 - Any time a polymorphic field is used in your `Child Object Where Clause`, you must also have a constraint on the parent-level `Type` in order for it to work. If you are filtering on `Task.What`, for example, you must have only a single SObject-parent type as part of your where clause, e.g. `What.Name = 'someName' AND What.Type = 'Account'`.
 - for rollups set up against objects with Large Data Volume (LDV - typically when the number of records for a given object exceed 300k), please note that full recalculations (either through the `REFRESH` context in Flow or through the `Recalculate Rollups` tab) are subject to the same query limits that exist elsewhere with SOQL; namely, that filtering on non-indexed fields can cause the initial batch recalculation process to timeout. If you receive an error with the message `REQUEST_RUNNING_TOO_LONG`, it's likely you're trying to roll values up using a where clause with non-indexed fields. Try changing your where clause to use indexed fields, or contact Salesforce Support to have a custom index created (as of Winter '23, you can also create custom indexes programmatically through the CLI, but I would only recommend this option to advanced users)
-
-#### Task/Event/User Rollups - How To Configure Rollups When An Object Does Not Appear In The CMDT Dropdowns
-
-There are several limitations to Entity Definition relationships when using Custom Metadata Types - most notably that they don't work with all objects. User, Task, Event, Case Comment, and others are excluded from the dropdowns generated by Entity Definition fields. However, you still have options when it comes to creating Rollups where these unsupported objects are the children or parent. Note that for both options, I've included YouTube links -.
-
-1. You can use the base Invocable action - the one titled `Perform rollup on records` - as that one allows you to enter the values for the child/parent with text. [Here's an example of me filling out the base action on YouTube](https://youtu.be/jZy4gUKjw3Q?t=1133). If an object supports Record Triggered Flows but not the CMDT dropdowns, this is the perfect way to quickly get up and running
-2. You can create simple Apex triggers - [I show off how to do this on YouTube](https://www.youtube.com/watch?v=RyQHXi5boW0&t=839s). That link will forward you to the exact timestamp where the Task/Event explanation begins, but the example is broadly applicable to any object that isn't supported via the built-in dropdowns
 
 </details>
 
@@ -226,9 +219,12 @@ These are the fields on the `Rollup Control` custom metadata type:
 - Apex Rollup (optional) - lookup field to the `Rollup__mdt` metadata record.
 - `Should Abort Run` - if done at the `Org_Defaults` level, completely shuts down all rollup operations in the org. Otherwise, can be used on an individual rollup basis to turn on/off.
 - `Should Duplicate Rules Be Ignored` (defaults to false) - By default, duplicate rules are enforced on rollup updates. Set this to true to bypass duplicate rules for rollups.
+- `Should Optimize CMDT Queries` (defaults to false) - if you _only_ use text fields to fill out your Rollup Custom Metadata Records, you can flip this to true to optimize how long it takes for queries to pull back all of the configured rollups within an org. This can be a really nice performance boost, but it comes at the cost of being unable to use the dropdown options for configuring your parent/child types and their corresponding fields. You can _only_ use this option if _all_ rollup records associated with a given rollup control use the text fields for configuration.
 - `Should Run As` - a picklist dictating the preferred method for running rollup operations. Possible values are `Queueable`, `Batchable`, or `Synchronous Rollup`. By default, Apex Rollup runs asynchronously as a queueable. Only one queueable can be fired from a process that's already asynchronous, and while Apex Rollup automatically detects such things, if _another_ bit of code that runs _after_ Apex Rollup needs to use that Queueable, `Batchable` may be a better option. When set to `Synchronous Rollup`, all calculations occur prior to an insert / update / delete being finished on the children records.
 - `Should Run Single Records Synchronously` - Apex Rollup typically uses the `Should Run As` picklist to determine the default execution context for rollups (which tends to be async). This checkbox deviates from that methodology by forcing single record updates to run sync (whenever possible), which helps with handling updates from datatables or other features using Lightning Data Service (LDS).
 - `Should Skip Resetting Parent Fields` (defaults to false) - for full recalculations and REFRESH-based child item updates, Apex Rollup by default assumes that for a parent record with no matching children, the parent-level field should be reset. If this checkbox is set to true, those parent records without results will simply be ignored, and will not be updated.
+- `Should Throw On Save Errors` (defaults to false) - by default, Apex Rollup does not throw when a parent-level update fails due to something like validation rules failing or errors being thrown from Flow/Apex. Set this to true if you'd like to bubble up save exceptions.
+- `Should Use JSON Serialization Strategy` (defaults to false) - toggle this to true in orgs that cannot afford another active Dataweave script, or to experiment with using native deserialization instead of Dataweave deserialization with respect to Rollup State records (used during batch full recalcs).
 - `Trigger Or Invocable Name` - If you are using custom Apex, a schedulable, or rolling up by way of the Invocable action and can't use the Apex Rollup lookup field. Use the pattern `trigger_fieldOnCalcItem_to_rollupFieldOnTarget_rollup` - for example: 'trigger_opportunity_stagename_to_account_name_rollup' (use lowercase on the field names). If there is a matching Rollup Limit record, those rules will be used. The first part of the string comes from how a rollup has been invoked - either by `trigger`, `invocable`, or `schedule`. A scheduled flow still uses `invocable`!
 
 </details>
@@ -278,6 +274,7 @@ Here are the arguments necessary to invoke Apex Rollup from a Flow / Process Bui
 - `Group By Row Start Delimiter` (optional) - if set, this is the delimiter which prefaces each row in the group by rollup to delimit results. Defaults to `-` if not supplied
 - `Group By Row End Delimiter` (optional) - if set, this is the delimiter which is appended to each row in the group by rollup to delimit results. Defaults to a new line character if not supplied. Please also note that different new line characters are required depending on what type of field you're rolling up to - `<br>` will work for Rich Text fields, for example, while `\n` is the way to enter new lines for long text areas
 - `One To Many Grandparent Fields` (optional, Comma separated list) - see [Rollup Custom Metadata Field Breakdown](#rollup-custom-metadata-field-breakdown) for more info, used in conjunction with `Grandparent Relationship Field Path`
+- `Is Distinct` (optional, defaults to `false`) - de-duplicates the children item values for any parent prior to rolling them up
 - `Is Full Record Set` (optional) - converts any rollup into a full recalculation (e.g. all _other_ child records associated with the parent(s) of the child records being passed in will be fetched and used in the rollup calculation)
 - `Is Rollup Started From Parent` (optional, defaults to `{!$GlobalConstant.False}`) - set to `{!$GlobalConstant.True}` if collection being passed in is the parent SObject, and you want to recalculate the defined rollup operation for the passed in parent records. Used in conjunction with `Child Object Type When Rollup Started From Parent`. If you are using `Is Rollup Started From Parent` and grandparent rollups with Tasks/Events (or anything with a polymorphic relationship field like `Who` or `What` on Task/Event; the `Parent` field on `Contact Point Address` is another example of such a field), you **must** also include a filter for `What.Type` or `Who.Type` in your `Child Object Where Clause` in order to proceed, e.g. `What.Type = 'Account'`.
 - `Is Table Formatted` (optional, defaults to `false`) - set this to true _instead of_ using the `Group By Row Start Delimiter` and `Group By Row End Delimiter` if you are rolling up to a rich text field and you want the output to be a table.
@@ -345,7 +342,7 @@ There is an included Lightning Web Component (LWC) that will show up in the "Cus
 
 **Special notes on the recalc button**
 
-- It relies on your rollups being configured using the `Rollup__mdt` CMDT. Unfortunately this means that it won't work for User/Task/Event-based rollups, or Rollups that are configured via the base Invocable Action (which uses text fields instead of `Rollup__mdt` records)
+- It relies on your rollups being configured using the `Rollup__mdt` CMDT. Unfortunately this means that it won't work for Rollups that are configured via the base Invocable Action
 - The button will not display on the flexipage at all until at least one `Rollup__mdt.LookupObject__c` field matches the SObject whose record flexipage you're dropping the button on
 - The button _will_ display even if a given parent record has no matching children associated with the rollup(s) in question.
 - This particular rollup runs synchronously, so it won't eat into your Asynchronous Job limits for the day; it also refreshes any Aura/page-layout sections of the page (LWC-based sections of the page should update automatically).
@@ -364,7 +361,7 @@ Rollup.schedule(
   'My example job name',
   'my cron expression, like 0 0 0 * * ?',
   'my SOQL query, like SELECT Id, Amount FROM Opportunity WHERE CreatedDate > YESTERDAY',
-  'The API name of the SObject associated with Rollup__mdt records configuring the rollup operation',
+  'The API name of the Child SObject associated with Rollup__mdt records for this schedule',
   null
 );
 ```
@@ -456,13 +453,15 @@ global static void runFromCDCTrigger()
 
 // imperatively from Apex, relying on CMDT for additional rollup info
 // if you are actually using this from WITHIN a trigger, the second argument should
-// ALWAYS be the "Trigger.operationType" static variable
-global static void runFromApex(List<SObject> calcItems, TriggerOperation rollupContext)
+// ALWAYS be the "Trigger.operationType" static variable (unless you're unit testing)
+global static void runFromApex(List<SObject> children, TriggerOperation rollupContext)
+
+// overload of the above, with support for the Trigger.oldMap variable (or your unit-tested approximation thereof)
+global static void runFromApex(List<SObject> children, Map<Id, SObject> oldChildrenMap, TriggerOperation rollupContext)
 
 // for more info on how this method differs from the one above it, check out the "Parent Level Merges" section!
-// for anything OTHER than merge situations or rollups starting from Task, Event, or User, use of this method
-// is an anti-pattern
-global static Rollup runFromApex(List<Rollup__mdt> rollupMetadata, Evaluator eval, List<SObject> calcItems, Map<Id, SObject> oldCalcItems)
+// for anything OTHER than merge situations use of this method is an anti-pattern
+global static Rollup runFromApex(List<Rollup__mdt> rollupMetadata, Evaluator eval, List<SObject> children, Map<Id, SObject> oldChildrenMap)
 
 // imperatively from Apex with arguments taking the place of values previously supplied by CMDT
 // can be used in conjunction with "batch" to group rollup operations (as seen in the example preceding this section)
@@ -945,41 +944,6 @@ trigger ContactTrigger on Contact(after delete) {
 }
 ```
 
-If you are using record-triggered flows (or the invocable actions in general), _and_ your child records are targeting Task, Event, or User, this is one area you'll still need to conform to the above with some special caveats. While it's true that Custom Metadata `Rollup__mdt` records can't be created for these three objects, that doesn't mean those very same records can't be synthetically created in Apex (or that the globally exposed Apex rollup methods can't be used on those objects). To that effect, your corresponding `ContactTrigger` (or after delete method within your trigger handler class, since hopefully we're all using those ...) would look something like this:
-
-```java
-trigger ContactTrigger on Contact(after delete) {
-  // each of these Rollups should directly correspond to the equivalent invocable Rollup action
-  // this is because merge-related rollups will bypass your record-triggered flows and do the work
-  // directly within the Apex trigger. If you aren't operating on Task/Event/User as the child object,
-  // set up your rollups using CMDT and use "Rollup.runFromTrigger();" instead!
-  Rollup.batch(
-    Rollup.firstFromApex(
-      Task.Subject,
-      Task.WhoId,
-      Contact.Id,
-      Contact.Description,
-      Contact.SObjectType,
-      null, // default recalc value
-      new List<RollupOrderBy__mdt>{
-        new RollupOrderBy__mdt(
-          FieldName__c = 'ActivityDate',
-          Ranking__c = 0
-        )
-      },
-      RollupEvaluator.getWhereEval('Subject = \'Hello world!\'', Task.SObjectType)
-    ),
-    Rollup.concatDistinctFromApex(
-      Event.Subject,
-      Event.WhoId,
-      Contact.Id,
-      Contact.Description,
-      Contact.SObjectType
-    )
-  );
-}
-```
-
 ### Change Data Capture (CDC)
 
 As of [v1.0.4](https://github.com/jamessimone/apex-rollup/releases/tag/v1.0.4), CDC _is_ supported. However, at the moment Change Data Capture can be used strictly through CMDT, and requires a different one-liner for installation into your CDC object Trigger:
@@ -1020,9 +984,10 @@ You have several options for custom logging plugins for Rollup (all Rollup Plugi
 public class RollupLogger {
 
   public interface ILogger {
-    void log(String logString, LoggingLevel logLevel);
-    void log(String logString, Object logObject, LoggingLevel logLevel);
+    void log(String logString, System.LoggingLevel logLevel);
+    void log(String logString, Object logObject, System.LoggingLevel logLevel);
     void save();
+    ILogger updateRollupControl(RollupControl__mdt control);
   }
 }
 
@@ -1030,7 +995,7 @@ public class RollupLogger {
 
 You can implement `RollupLogger.ILogger` with your own code and specify that class name in the `Rollup Plugin` CMDT records. _Alternatively_, you can also _extend_ `RollupLogger` itself and override its own logging methods; this gives you the benefit of built-in message formatting through the use of the protected method `getLogStringFromObject`, found in `RollupLogger.cls`. For more info, refer to that class and its methods. Either way, the API name for the CMDT record **must** include `Logger` in order to work (eg: `RollupCustomObjectLogger`, `RollupNebulaLoggerAdapter`).
 
-You can use the included `Rollup Plugin Parameter` CMDT record `Logging Debug Level` to fine-tune the logging level you'd like to use when making use of Apex debug logs (from method #3, above). Valid entries conform to the `LoggingLevel` enum: ERROR, WARN, INFO, DEBUG, FINE, FINER, FINEST. FINEST provides the highest level of detail; ERROR provides the least. INFO will provide a high-level overview, while DEBUG will contain data about individual parent records being rolled up. The granularity of the data logged will continue to get finer as you move towards FINEST as the logging level.
+You can use the included `Rollup Plugin Parameter` CMDT record `Logging Debug Level` to fine-tune the logging level you'd like to use when making use of Apex debug logs (from method #3, above). Valid entries conform to the `System.LoggingLevel` enum: ERROR, WARN, INFO, DEBUG, FINE, FINER, FINEST. FINEST provides the highest level of detail; ERROR provides the least. INFO will provide a high-level overview, while DEBUG will contain data about individual parent records being rolled up. The granularity of the data logged will continue to get finer as you move towards FINEST as the logging level.
 
 ### Other Rollup Plugins
 

@@ -1,4 +1,5 @@
 public without sharing class RollupRecursionItem {
+  @SuppressWarnings('PMD.FieldNamingConventions')
   private final Id Id;
   private final Integer stackCount;
   private final String lookupKey;
@@ -65,7 +66,7 @@ public without sharing class RollupRecursionItem {
     private Integer hash = 7; // chosen at random to start seeding the hash
 
     public Hasher add(Object o) {
-      this.addHash(o == null ? NULL_HASH : o.hashCode());
+      this.addHash(o?.hashCode() ?? NULL_HASH);
       return this;
     }
 

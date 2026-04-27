@@ -192,6 +192,15 @@ private class RollupEvaluatorTests {
   }
 
   @IsTest
+  static void shouldProperlyHandleWildcardsAtTheBeginningAndEnd() {
+    String likeClauseEndingWithPercentage = 'Name LIKE \'|-2CYTD%\'';
+    RollupEvaluator.WhereFieldEvaluator eval = new RollupEvaluator.WhereFieldEvaluator(likeClauseEndingWithPercentage, ContactPointConsent.SObjectType);
+    System.assertEquals(true, eval.matches(new ContactPointConsent(Name = '|-2CYTD-1|-2FYTD')));
+    System.assertEquals(true, eval.matches(new ContactPointConsent(Name = '|-2CYTD-2')));
+    System.assertEquals(false, eval.matches(new ContactPointConsent(Name = '|-1CYTD-3')));
+  }
+
+  @IsTest
   static void shouldFilterCalcItemsThatContainAndOrStringsThatAreNotFilterConditions() {
     Opportunity oppOne = new Opportunity(Name = 'A or B');
     Opportunity oppTwo = new Opportunity(Name = 'A and B');
@@ -545,6 +554,29 @@ private class RollupEvaluatorTests {
     Rollup.Evaluator eval = new RollupEvaluator.WhereFieldEvaluator(whereClause, QuickText.SObjectType);
     System.assertEquals(true, eval.matches(qt), 'Channel should match');
     System.assertNotEquals(true, eval.matches(nonMatch), 'Does not have full picklist val, should not match');
+  }
+
+  @IsTest
+  static void shouldReturnFalseForEmptyIncludesList() {
+    QuickText qt = new QuickText();
+
+    String whereClause = 'Channel INCLUDES (\'1\')';
+
+    Rollup.Evaluator eval = new RollupEvaluator.WhereFieldEvaluator(whereClause, QuickText.SObjectType);
+    System.assertEquals(false, eval.matches(qt));
+  }
+
+  @IsTest
+  static void shouldCorrectlyIdentifyIncludesForMultiSelectPicklistsWithSpaces() {
+    // QuickText.Channel is the only multi-select picklist in a vanilla Salesforce org
+    QuickText one = new QuickText(Channel = 'AAA;BBB;CCC');
+    QuickText two = new QuickText(Channel = 'AAA');
+    String whereClause = 'Channel INCLUDES (\'In-Person Meeting\')';
+
+    Rollup.Evaluator eval = new RollupEvaluator.WhereFieldEvaluator(whereClause, QuickText.SObjectType);
+
+    System.assertEquals(false, eval.matches(one));
+    System.assertEquals(false, eval.matches(two));
   }
 
   @IsTest
@@ -1023,6 +1055,14 @@ private class RollupEvaluatorTests {
   }
 
   @IsTest
+  static void returnsLowercaseParentLevelFields() {
+    String whereClause = 'opportunity.account.name = \'some account\'';
+    List<String> queryFields = new RollupEvaluator.WhereFieldEvaluator(whereClause, OpportunityLineItem.SObjectType).getQueryFields();
+    System.assertEquals(1, queryFields.size(), queryFields);
+    System.assertEquals('opportunity.account.name', queryFields[0]);
+  }
+
+  @IsTest
   static void supportsNonPolymorphicTypeFields() {
     String whereClause = 'Campaign.Type <> \'Something Else\'';
     RollupEvaluator.WhereFieldEvaluator eval = new RollupEvaluator.WhereFieldEvaluator(whereClause, Opportunity.SObjectType);
@@ -1121,15 +1161,13 @@ private class RollupEvaluatorTests {
 
   @IsTest
   static void pascalCaseForFieldNamesIsNotRequired() {
-    String poorlyCasedFieldName = Opportunity.IsClosed.getDescribe().getName().toLowerCase();
+    String poorlyCasedFieldName = Opportunity.IsClosed.toString().toLowerCase();
 
     Opportunity isClosedFalse = (Opportunity) JSON.deserialize('{ "IsClosed": false }', Opportunity.class);
     OpportunityLineItem target = new OpportunityLineItem(Opportunity = isClosedFalse);
     System.assertEquals(false, target.Opportunity.IsClosed);
     RollupEvaluator.WhereFieldEvaluator eval = new RollupEvaluator.WhereFieldEvaluator(
-      'Opportunity.' +
-      poorlyCasedFieldName +
-      ' = false',
+      'Opportunity.' + poorlyCasedFieldName + ' = false',
       target.getSObjectType()
     );
 
@@ -1250,6 +1288,37 @@ private class RollupEvaluatorTests {
     System.assertEquals(false, eval.matches(nonMatch1));
     System.assertEquals(false, eval.matches(nonMatch2));
     System.assertEquals(false, eval.matches(nonMatch3));
+  }
+
+  @IsTest
+  static void stripsExtraParantheticalStructures() {
+    String whereClause = '(Name IN (\'0-Current\', \'1-30 Days\', \'31-60 Days\')) AND Name IN (\'0-Current\', \'1-30 Days\', \'31-60 Days\')';
+
+    RollupEvaluator eval = new RollupEvaluator.WhereFieldEvaluator(whereClause, ContactPointConsent.SObjectType);
+
+    System.assertEquals(true, eval.matches(new ContactPointConsent(Name = '0-Current')));
+  }
+
+  @IsTest
+  static void whereClauseThatEndsWithColonDelimitedDateLiteralShouldWorkSpaces() {
+    String whereClause = 'ActivityDate >= TODAY AND ActivityDate <= NEXT_N_DAYS: 30';
+
+    RollupEvaluator.WhereFieldEvaluator eval = new RollupEvaluator.WhereFieldEvaluator(whereClause, Task.SObjectType);
+
+    System.assertEquals(true, eval.matches(new Task(ActivityDate = System.today())));
+    System.assertEquals(true, eval.matches(new Task(ActivityDate = System.today().addDays(30))));
+    System.assertEquals(false, eval.matches(new Task(ActivityDate = System.today().addDays(31))));
+  }
+
+  @IsTest
+  static void whereClauseThatEndsWithColonDelimitedDateLiteralShouldWorkNoSpaces() {
+    String whereClause = 'ActivityDate >= TODAY AND ActivityDate <= NEXT_N_DAYS:30';
+
+    RollupEvaluator.WhereFieldEvaluator eval = new RollupEvaluator.WhereFieldEvaluator(whereClause, Task.SObjectType);
+
+    System.assertEquals(true, eval.matches(new Task(ActivityDate = System.today())));
+    System.assertEquals(true, eval.matches(new Task(ActivityDate = System.today().addDays(30))));
+    System.assertEquals(false, eval.matches(new Task(ActivityDate = System.today().addDays(31))));
   }
 
   private static String getSoqlCompliantDatetime(Datetime dt) {

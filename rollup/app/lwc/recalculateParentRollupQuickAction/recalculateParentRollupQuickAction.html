@@ -1,0 +1,13 @@
+<template>
+  <template lwc:if={isExecuting}>
+    <div class="slds-backdrop slds-backdrop_open">
+      <lightning-spinner alternative-text="Recalculating rollup..." size="medium" variant="neutral"></lightning-spinner>
+    </div>
+  </template>
+  <c-recalculate-parent-rollup-flexipage
+    class="slds-hide"
+    record-id={fetchedRecordId}
+    object-api-name={computedObjectApiName}
+    onloadingfinished={handleLoadingFinished}
+  ></c-recalculate-parent-rollup-flexipage>
+</template>

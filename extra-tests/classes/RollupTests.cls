@@ -1,3 +1,4 @@
+@SuppressWarnings('PMD.NcssTypeCount')
 @IsTest
 private class RollupTests {
   static Rollup.Op testOp;
@@ -19,6 +20,7 @@ private class RollupTests {
     upsert new RollupSettings__c(IsEnabled__c = true);
   }
 
+  @SuppressWarnings('PMD.ExcessiveParameterList')
   private class FactoryMock extends RollupCalculator.Factory {
     public override RollupCalculator getCalculator(
       Rollup.Op op,
@@ -337,6 +339,45 @@ private class RollupTests {
   }
 
   @IsTest
+  static void countFullRecordSetRespectsPreexistingValueWithoutDoubleCounting() {
+    Account acc = [SELECT Id, AnnualRevenue FROM Account];
+    acc.AnnualRevenue = 2;
+    RollupAsyncProcessor.stubParentRecords = new List<SObject>{ acc };
+
+    insert new List<ContactPointAddress>{
+      new ContactPointAddress(PreferenceRank = 50, Name = 'one', ParentId = acc.Id),
+      new ContactPointAddress(PreferenceRank = 50, Name = 'two', ParentId = acc.Id)
+    };
+
+    ContactPointAddress cpa = new ContactPointAddress(PreferenceRank = 50, ParentId = acc.Id);
+    RollupTestUtils.DMLMock mock = RollupTestUtils.loadMock(new List<ContactPointAddress>{ cpa });
+    Rollup.defaultControl = new RollupControl__mdt(IsRollupLoggingEnabled__c = true, ShouldSkipResettingParentFields__c = true);
+    Rollup.apexContext = TriggerOperation.AFTER_INSERT;
+    Rollup.records = new List<ContactPointAddress>{ cpa };
+    Rollup.shouldRun = true;
+    Rollup.rollupMetadata = new List<Rollup__mdt>{
+      new Rollup__mdt(
+        CalcItem__c = 'ContactPointAddress',
+        CalcItemWhereClause__c = 'PreferenceRank = 50',
+        LookupFieldOnCalcItem__c = 'ParentId',
+        LookupFieldOnLookupObject__c = 'Id',
+        LookupObject__c = 'Account',
+        IsFullRecordSet__c = true,
+        RollupFieldOnCalcItem__c = 'PreferenceRank',
+        RollupFieldOnLookupObject__c = 'AnnualRevenue',
+        RollupOperation__c = 'COUNT'
+      )
+    };
+
+    Test.startTest();
+    Rollup.runFromTrigger();
+    Test.stopTest();
+
+    System.assertEquals(1, mock.Records.size(), 'Account should have been updated');
+    System.assertEquals(3, acc.AnnualRevenue);
+  }
+
+  @IsTest
   static void countFullRecordSetProperlyFetchesAllMatchingChildren() {
     Account acc = [SELECT Id, AnnualRevenue FROM Account];
     acc.AnnualRevenue = 2;
@@ -502,7 +543,8 @@ private class RollupTests {
         RollupOperation__c = 'COUNT',
         CalcItem__c = 'ContactPointAddress',
         FullRecalculationDefaultNumberValue__c = 0,
-        CalcItemWhereClause__c = 'PreferenceRank != ' + cpa.PreferenceRank
+        CalcItemWhereClause__c = 'PreferenceRank != ' + cpa.PreferenceRank,
+        IsFullRecordSet__c = true
       )
     };
     Rollup.apexContext = TriggerOperation.BEFORE_DELETE;
@@ -531,6 +573,7 @@ private class RollupTests {
     };
 
     RollupTestUtils.DMLMock mock = RollupTestUtils.loadMock(new List<Opportunity>{ opp });
+    Rollup.onlyUseMockMetadata = true;
     Rollup.rollupMetadata = new List<Rollup__mdt>{
       new Rollup__mdt(
         RollupFieldOnCalcItem__c = 'Amount',
@@ -571,7 +614,8 @@ private class RollupTests {
         RollupOperation__c = 'SUM',
         CalcItem__c = 'ContactPointAddress',
         FullRecalculationDefaultNumberValue__c = 0,
-        CalcItemWhereClause__c = 'PreferenceRank != 100'
+        CalcItemWhereClause__c = 'PreferenceRank != 100',
+        IsFullRecordSet__c = true
       )
     };
     Rollup.apexContext = TriggerOperation.AFTER_INSERT;
@@ -1361,6 +1405,7 @@ private class RollupTests {
     RollupTestUtils.DMLMock mock = RollupTestUtils.loadMock(new List<ContactPointAddress>{ somethingElseName });
     Rollup.oldRecordsMap = new Map<Id, SObject>{ somethingElseName.Id => somethingElseName };
     Rollup.apexContext = TriggerOperation.BEFORE_DELETE;
+    Rollup.onlyUseMockMetadata = true;
     Rollup.rollupMetadata = new List<Rollup__mdt>{
       new Rollup__mdt(
         CalcItem__c = 'ContactPointAddress',
@@ -1527,7 +1572,7 @@ private class RollupTests {
 
   @IsTest
   static void shouldMaxOnPicklistStringsOnInsert() {
-    List<PicklistEntry> picklistVals = Lead.LeadSource.getDescribe().getPicklistValues();
+    List<PicklistEntry> picklistVals = Opportunity.StageName.getDescribe().getPicklistValues();
 
     if (picklistVals.size() < 2) {
       return; // sorry
@@ -1535,30 +1580,34 @@ private class RollupTests {
 
     Account acc = [SELECT Id FROM Account];
 
-    List<Lead> leads = new List<Lead>{
-      new Lead(Company = acc.Id, LeadSource = picklistVals[0].getValue(), LastName = 'Max Picklist on insert one'),
-      new Lead(Company = acc.Id, LeadSource = picklistVals[1].getValue(), LastName = 'Max Picklist on insert two')
+    List<Opportunity> opportunities = new List<Opportunity>{
+      new Opportunity(Name = 'Max Picklist on insert one', StageName = picklistVals[0].getValue(), AccountId = acc.Id, CloseDate = Date.today()),
+      new Opportunity(Name = 'Max Picklist on insert two', StageName = picklistVals[1].getValue(), AccountId = acc.Id, CloseDate = Date.today())
     };
-    insert leads; // not the best, either, but we need to be able to use SOQL below
+    insert opportunities; // not the best, either, but we need to be able to use SOQL below
 
-    RollupTestUtils.DMLMock mock = RollupTestUtils.loadMock(leads);
+    RollupTestUtils.DMLMock mock = RollupTestUtils.loadMock(opportunities);
     Rollup.apexContext = TriggerOperation.AFTER_INSERT;
 
     Test.startTest();
-    Rollup.maxFromApex(Lead.LeadSource, Lead.Company, Account.Id, Account.AccountNumber, Account.SObjectType).runCalc();
+    Rollup.maxFromApex(Opportunity.StageName, Opportunity.AccountId, Account.Id, Account.AccountNumber, Account.SObjectType).runCalc();
     Test.stopTest();
 
-    AggregateResult res = [SELECT Max(LeadSource) maxSource FROM Lead WHERE Id = :new Map<Id, Lead>(leads).keySet()][0];
-    String maxLeadSource = (String) res.get('maxSource');
+    AggregateResult res = [
+      SELECT Max(StageName) maxStage
+      FROM Opportunity
+      WHERE Id = :new Map<Id, Opportunity>(opportunities).keySet()
+    ][0];
+    String maxStage = (String) res.get('maxStage');
 
     System.assertEquals(1, mock.Records.size(), 'Records should have been populated MAX BEFORE_INSERT PICKLIST STRING');
     Account updatedAcc = (Account) mock.Records[0];
-    System.assertEquals(maxLeadSource, updatedAcc.AccountNumber, 'MAX BEFORE_INSERT should take the maximum picklist string');
+    System.assertEquals(maxStage, updatedAcc.AccountNumber, 'MAX BEFORE_INSERT should take the maximum picklist string');
   }
 
   @IsTest
   static void shouldMinPicklistStringsOnInsert() {
-    List<PicklistEntry> picklistVals = Lead.LeadSource.getDescribe().getPicklistValues();
+    List<PicklistEntry> picklistVals = Opportunity.StageName.getDescribe().getPicklistValues();
 
     if (picklistVals.size() < 2) {
       return; // sorry
@@ -1566,27 +1615,30 @@ private class RollupTests {
 
     Account acc = [SELECT Id FROM Account];
 
-    List<Lead> leads = new List<Lead>{
-      new Lead(Company = acc.Id, LeadSource = picklistVals[0].getValue(), LastName = 'Min Picklist on insert one'),
-      new Lead(Company = acc.Id, LeadSource = picklistVals[1].getValue(), LastName = 'Min Picklist on insert two')
+    List<Opportunity> opportunities = new List<Opportunity>{
+      new Opportunity(Name = 'Min Picklist on insert one', StageName = picklistVals[0].getValue(), AccountId = acc.Id, CloseDate = Date.today()),
+      new Opportunity(Name = 'Min Picklist on insert two', StageName = picklistVals[1].getValue(), AccountId = acc.Id, CloseDate = Date.today())
     };
-    insert leads;
+    insert opportunities;
 
-    RollupTestUtils.DMLMock mock = RollupTestUtils.loadMock(leads);
+    RollupTestUtils.DMLMock mock = RollupTestUtils.loadMock(opportunities);
     Rollup.apexContext = TriggerOperation.AFTER_INSERT;
 
     Test.startTest();
-    Rollup.minFromApex(Lead.LeadSource, Lead.Company, Account.Id, Account.AccountNumber, Account.SObjectType).runCalc();
+    Rollup.minFromApex(Opportunity.StageName, Opportunity.AccountId, Account.Id, Account.AccountNumber, Account.SObjectType).runCalc();
     Test.stopTest();
 
-    AggregateResult res = [SELECT MIN(LeadSource) minSource FROM Lead WHERE Id = :new Map<Id, Lead>(leads).keySet()][0];
-    String minLeadSource = (String) res.get('minSource');
+    AggregateResult res = [
+      SELECT MIN(StageName) minStage
+      FROM Opportunity
+      WHERE Id = :new Map<Id, Opportunity>(opportunities).keySet()
+    ][0];
+    String minStage = (String) res.get('minStage');
 
     System.assertEquals(1, mock.Records.size(), 'Records should have been populated MIN BEFORE_INSERT PICKLIST STRING');
     Account updatedAcc = (Account) mock.Records[0];
-    System.assertEquals(minLeadSource, updatedAcc.AccountNumber, 'MIN BEFORE_INSERT should take the minimum picklist string');
+    System.assertEquals(minStage, updatedAcc.AccountNumber, 'MIN BEFORE_INSERT should take the minimum picklist string');
   }
-
   @IsTest
   static void shouldAverageOnInsert() {
     // average is a special case; even on insert, we have to also check for pre-existing records existing
@@ -1749,30 +1801,30 @@ private class RollupTests {
   static void shouldPassRecalcValueForConcatDistinct() {
     rollupOp = Rollup.Op.CONCAT_DISTINCT;
     RollupCalculator.Factory = new FactoryMock();
-    RollupTestUtils.loadAccountIdMock(new List<ContactPointAddress>{ new ContactPointAddress(PreferenceRank = 5) });
+    RollupTestUtils.DMLMock mock = RollupTestUtils.loadAccountIdMock(new List<ContactPointAddress>{ new ContactPointAddress(Name = 'Hi', PreferenceRank = 5) });
     Rollup.apexContext = TriggerOperation.AFTER_INSERT;
 
     Test.startTest();
-    Rollup.concatDistinctFromApex(ContactPointAddress.PreferenceRank, ContactPointAddress.ParentId, Account.Id, Account.AnnualRevenue, Account.SObjectType, 'a')
-      .runCalc();
+    Rollup.concatDistinctFromApex(ContactPointAddress.Name, ContactPointAddress.ParentId, Account.Id, Account.Description, Account.SObjectType, 'a').runCalc();
     Test.stopTest();
 
     System.assertEquals('a', testMetadata.FullRecalculationDefaultStringValue__c);
+    System.assertEquals('a', mock.Records.get(0).get(Account.Description));
   }
 
   @IsTest
   static void shouldPassRecalcValueForConcat() {
     rollupOp = Rollup.Op.CONCAT;
     RollupCalculator.Factory = new FactoryMock();
-    RollupTestUtils.loadAccountIdMock(new List<ContactPointAddress>{ new ContactPointAddress(PreferenceRank = 5) });
+    RollupTestUtils.DMLMock mock = RollupTestUtils.loadAccountIdMock(new List<ContactPointAddress>{ new ContactPointAddress(Name = 'Hi', PreferenceRank = 5) });
     Rollup.apexContext = TriggerOperation.AFTER_INSERT;
 
     Test.startTest();
-    Rollup.concatFromApex(ContactPointAddress.PreferenceRank, ContactPointAddress.ParentId, Account.Id, Account.AnnualRevenue, Account.SObjectType, 'a')
-      .runCalc();
+    Rollup.concatFromApex(ContactPointAddress.Name, ContactPointAddress.ParentId, Account.Id, Account.Description, Account.SObjectType, 'a').runCalc();
     Test.stopTest();
 
     System.assertEquals('a', testMetadata.FullRecalculationDefaultStringValue__c);
+    System.assertEquals('a', mock.Records.get(0).get(Account.Description));
   }
 
   @IsTest
@@ -2441,7 +2493,7 @@ private class RollupTests {
   static void shouldRunSuccessfullyAsBatch() {
     RollupTestUtils.DMLMock mock = RollupTestUtils.loadAccountIdMock(new List<ContactPointAddress>{ new ContactPointAddress(PreferenceRank = 1) });
     Rollup.apexContext = TriggerOperation.AFTER_INSERT;
-    Rollup.defaultControl = new RollupControl__mdt(ShouldRunAs__c = RollupMetaPicklists.ShouldRunAs.Batchable, MaxLookupRowsBeforeBatching__c = 1);
+    Rollup.defaultControl = new RollupControl__mdt(MaxLookupRowsBeforeBatching__c = 1);
 
     Test.startTest();
     Rollup.countFromApex(ContactPointAddress.PreferenceRank, ContactPointAddress.ParentId, Account.Id, Account.AnnualRevenue, Account.SObjectType).runCalc();
@@ -2486,7 +2538,7 @@ private class RollupTests {
   static void shouldRunAsBatchableWhenSpecificRollupIsBatchable() {
     RollupTestUtils.DMLMock mock = RollupTestUtils.loadAccountIdMock(new List<ContactPointAddress>{ new ContactPointAddress(PreferenceRank = 1) });
     Rollup.apexContext = TriggerOperation.AFTER_INSERT;
-    Rollup.defaultControl = new RollupControl__mdt(MaxLookupRowsBeforeBatching__c = 1, ShouldRunAs__c = RollupMetaPicklists.ShouldRunAs.Batchable);
+    Rollup.defaultControl = new RollupControl__mdt(MaxLookupRowsBeforeBatching__c = 1);
 
     Test.startTest();
     Rollup.countFromApex(ContactPointAddress.PreferenceRank, ContactPointAddress.ParentId, Account.Id, Account.AnnualRevenue, Account.SObjectType).runCalc();
@@ -2658,7 +2710,7 @@ private class RollupTests {
     Test.stopTest();
 
     System.assertEquals(2, mock.Records.size(), mock.Records);
-    System.assertEquals(0, acc.AnnualRevenue);
+    System.assertEquals(null, acc.AnnualRevenue, 'Account with non-matching child should not have updated');
     System.assertEquals(0, oldAcc.AnnualRevenue);
     System.assertEquals(50, acc.NumberOfEmployees);
     System.assertEquals(0, oldAcc.NumberOfEmployees);
@@ -2822,8 +2874,8 @@ private class RollupTests {
     Test.stopTest();
 
     System.assertEquals(2, mock.Records.size(), 'Records should have been populated SUM AFTER_UPDATE, ' + mock.Records);
-    System.assertEquals(50, acc.AnnualRevenue, 'AVERAGE AFTER_UPDATE should take the diff between the current amount and the pre-existing one');
-    System.assertEquals(null, oldAcc.AnnualRevenue, 'AVERAGE AFTER_UPDATE should take the diff between the current amount and the pre-existing one');
+    System.assertEquals(50, acc.AnnualRevenue, 'AVERAGE AFTER_UPDATE should properly attribute the new amount to the new parent');
+    System.assertEquals(null, oldAcc.AnnualRevenue, 'AVERAGE AFTER_UPDATE should properly decrement the old amount from the old parent');
   }
 
   /** Re-queueing */
@@ -2898,9 +2950,6 @@ private class RollupTests {
     insert cpas;
 
     RollupTestUtils.DMLMock mock = RollupTestUtils.loadMock(cpas);
-    Rollup.defaultControl = new RollupControl__mdt(MaxNumberOfQueries__c = 2, MaxRollupRetries__c = 100);
-    // start as synchronous rollup to allow for one deferral
-    Rollup.specificControl = new RollupControl__mdt(ShouldRunAs__c = RollupMetaPicklists.ShouldRunAs.Synchronous, MaxNumberOfQueries__c = 2);
     Rollup.rollupMetadata = new List<Rollup__mdt>{
       new Rollup__mdt(
         CalcItem__c = 'ContactPointAddress',
@@ -2922,7 +2971,10 @@ private class RollupTests {
     System.assertEquals(1, mock.Records.size(), 'Grandparent record should have been found!');
     User updatedUser = (User) mock.Records[0];
     System.assertEquals(cpas[0].Name + ', ' + cpas[1].Name, updatedUser.AboutMe, 'Grandparent rollup should have worked!');
-    System.assertEquals('Completed', [SELECT Status FROM AsyncApexJob WHERE JobType = 'Queueable'].Status);
+    System.assertEquals(
+      1,
+      [SELECT COUNT() FROM AsyncApexJob WHERE JobType = 'Queueable' AND ApexClass.Name = :RollupTestUtils.getNamespaceSafeClassName(RollupAsyncProcessor.class)]
+    );
   }
 
   @IsTest
@@ -2935,12 +2987,7 @@ private class RollupTests {
     insert cpas;
 
     RollupTestUtils.DMLMock mock = RollupTestUtils.loadMock(cpas);
-    Rollup.defaultControl = new RollupControl__mdt(
-      MaxLookupRowsBeforeBatching__c = 0,
-      MaxNumberOfQueries__c = 2,
-      MaxRollupRetries__c = 100,
-      ShouldRunAs__c = RollupMetaPicklists.ShouldRunAs.Batchable
-    );
+    Rollup.defaultControl = new RollupControl__mdt(MaxLookupRowsBeforeBatching__c = 0, MaxNumberOfQueries__c = 2, MaxRollupRetries__c = 100);
     // start as synchronous rollup to allow for one deferral
     Rollup.specificControl = new RollupControl__mdt(ShouldRunAs__c = RollupMetaPicklists.ShouldRunAs.Synchronous, MaxNumberOfQueries__c = 4);
     Rollup.rollupMetadata = new List<Rollup__mdt>{
@@ -3002,8 +3049,8 @@ private class RollupTests {
   static void encapsulatesNamespaceInfoProperly() {
     Rollup.NamespaceInfo namespaceInfo = Rollup.getNamespaceInfo();
 
-    String rollupObjectName = Rollup__mdt.SObjectType.getDescribe(SObjectDescribeOptions.DEFERRED).getName();
-    System.assertEquals(rollupObjectName + '.' + Rollup__mdt.RollupOperation__c.getDescribe().getName(), nameSpaceInfo.safeRollupOperationField);
+    String rollupObjectName = Rollup__mdt.SObjectType.toString();
+    System.assertEquals(rollupObjectName + '.' + Rollup__mdt.RollupOperation__c.toString(), nameSpaceInfo.safeRollupOperationField);
     System.assertEquals(rollupObjectName, nameSpaceInfo.safeObjectName);
     System.assertEquals(Rollup.class.getName() == 'Rollup' ? '' : Rollup.class.getName().substringBefore('.Rollup') + '__', nameSpaceInfo.namespace);
   }
@@ -3035,7 +3082,7 @@ private class RollupTests {
     );
     Rollup.apexContext = TriggerOperation.AFTER_INSERT;
     // one over the default limit
-    RollupLimits.orgAsyncJobsUsed = 250001;
+    RollupLimits.currentAsyncJobsUsed = 250001;
 
     // specifically no Test.startTest()/Test.stopTest() to prove it's been run sync
     Rollup.sumFromApex(ContactPointAddress.PreferenceRank, ContactPointAddress.ParentId, Account.Id, Account.AnnualRevenue, Account.SObjectType).runCalc();
@@ -3083,6 +3130,123 @@ private class RollupTests {
       )
       .runCalc();
 
-    Assert.areEqual('no-op', rollupResponse);
+    Assert.areEqual('No matching rollups to process', rollupResponse);
+  }
+
+  @IsTest
+  static void rollupGroupingOperationOccursIndependentlyOfDownstreamRollups() {
+    Account acc = [SELECT Id, Phone FROM Account];
+    acc.AnnualRevenue = 2; // should match count of contacts, below, to begin with
+    RollupAsyncProcessor.stubParentRecords = new List<SObject>{ acc };
+
+    Opportunity opp = new Opportunity(CloseDate = System.today(), Amount = 3, AccountId = acc.Id, StageName = '1', Name = 'Winning Record');
+    insert opp;
+    insert new List<SObject>{ new Contact(LastName = '1', AccountId = acc.Id), new Contact(LastName = '2', AccountId = acc.Id) };
+    Rollup.onlyUseMockMetadata = true;
+    RollupGrouping__mdt parentGrouping = new RollupGrouping__mdt(Id = RollupTestUtils.createId(RollupGrouping__mdt.SObjectType), RollupOperation__c = 'MAX');
+    Rollup.rollupMetadata = new List<Rollup__mdt>{
+      new Rollup__mdt(
+        CalcItem__c = 'Contact',
+        LookupFieldOnCalcItem__c = 'AccountId',
+        RollupFieldOnCalcItem__c = 'Id',
+        LookupObject__c = 'Account',
+        LookupFieldOnLookupObject__c = 'Id',
+        RollupFieldOnLookupObject__c = 'AnnualRevenue',
+        RollupOperation__c = 'COUNT',
+        RollupGrouping__r = parentGrouping
+      ),
+      new Rollup__mdt(
+        CalcItem__c = 'Opportunity',
+        LookupFieldOnCalcItem__c = 'AccountId',
+        RollupFieldOnCalcItem__c = 'Amount',
+        LookupObject__c = 'Account',
+        LookupFieldOnLookupObject__c = 'Id',
+        RollupFieldOnLookupObject__c = 'AnnualRevenue',
+        RollupOperation__c = 'SUM',
+        RollupGrouping__r = parentGrouping
+      )
+    };
+
+    Test.startTest();
+    Rollup.apexContext = TriggerOperation.AFTER_UPDATE;
+    Rollup.shouldRun = true;
+    Rollup.records = new List<Opportunity>{ opp };
+    Rollup.oldRecordsMap = new Map<Id, Opportunity>{ opp.Id => new Opportunity(Id = opp.Id, Amount = 1, AccountId = acc.Id) };
+    Rollup.runFromTrigger();
+    Test.stopTest();
+
+    acc = [SELECT AnnualRevenue FROM Account WHERE Id = :acc.Id];
+    Assert.areEqual(opp.Amount, acc.AnnualRevenue);
+  }
+
+  @IsTest
+  static void includesWhereClausesWorkOnUpdateMultipleChildren() {
+    Account acc = [SELECT Id, Phone FROM Account];
+    acc.AnnualRevenue = 2;
+    RollupAsyncProcessor.stubParentRecords = new List<SObject>{ acc };
+
+    Rollup.onlyUseMockMetadata = true;
+    Rollup.rollupMetadata = new List<Rollup__mdt>{
+      new Rollup__mdt(
+        CalcItem__c = 'QuickText',
+        LookupFieldOnCalcItem__c = 'Name',
+        RollupFieldOnCalcItem__c = 'Channel',
+        LookupObject__c = 'Account',
+        LookupFieldOnLookupObject__c = 'Id',
+        RollupFieldOnLookupObject__c = 'AnnualRevenue',
+        RollupOperation__c = 'COUNT',
+        CalcItemWhereClause__c = 'Channel INCLUDES (\'A\')',
+        IsFullRecordSet__c = true
+      )
+    };
+    List<QuickText> quickTexts = new List<QuickText>{
+      new QuickText(Channel = 'A', Name = acc.Id, Id = RollupTestUtils.createId(QuickText.SObjectType)),
+      new QuickText(Name = acc.Id, Id = RollupTestUtils.createId(QuickText.SObjectType))
+    };
+
+    Test.startTest();
+    Rollup.apexContext = TriggerOperation.AFTER_UPDATE;
+    Rollup.shouldRun = true;
+    Rollup.records = quickTexts;
+    Rollup.oldRecordsMap = new Map<Id, QuickText>{
+      quickTexts[0].Id => quickTexts[0],
+      quickTexts[1].Id => new QuickText(Channel = 'A', Id = quickTexts[1].Id, Name = acc.Id)
+    };
+    Rollup.runFromTrigger();
+    Test.stopTest();
+
+    Assert.areEqual(1, acc.AnnualRevenue);
+  }
+
+  @IsTest
+  static void includesWhereClausesWorkOnUpdateWithOnlyOneMatch() {
+    Account acc = [SELECT Id, Phone FROM Account];
+    acc.AnnualRevenue = 1;
+    RollupAsyncProcessor.stubParentRecords = new List<SObject>{ acc };
+
+    Rollup.onlyUseMockMetadata = true;
+    Rollup.rollupMetadata = new List<Rollup__mdt>{
+      new Rollup__mdt(
+        CalcItem__c = 'QuickText',
+        LookupFieldOnCalcItem__c = 'Name',
+        RollupFieldOnCalcItem__c = 'Channel',
+        LookupObject__c = 'Account',
+        LookupFieldOnLookupObject__c = 'Id',
+        RollupFieldOnLookupObject__c = 'AnnualRevenue',
+        RollupOperation__c = 'COUNT',
+        CalcItemWhereClause__c = 'Channel INCLUDES (\'A\')'
+      )
+    };
+    List<QuickText> quickTexts = new List<QuickText>{ new QuickText(Name = acc.Id, Id = RollupTestUtils.createId(QuickText.SObjectType)) };
+
+    Test.startTest();
+    Rollup.apexContext = TriggerOperation.AFTER_UPDATE;
+    Rollup.shouldRun = true;
+    Rollup.records = quickTexts;
+    Rollup.oldRecordsMap = new Map<Id, QuickText>{ quickTexts[0].Id => new QuickText(Channel = 'A', Id = quickTexts[0].Id, Name = acc.Id) };
+    Rollup.runFromTrigger();
+    Test.stopTest();
+
+    Assert.areEqual(null, acc.AnnualRevenue);
   }
 }

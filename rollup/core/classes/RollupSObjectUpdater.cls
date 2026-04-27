@@ -1,11 +1,14 @@
+@SuppressWarnings('PMD.AvoidGlobalModifier')
 global without sharing virtual class RollupSObjectUpdater {
+  @SuppressWarnings('PMD.FieldNamingConventions')
   @TestVisible
   private static String UPDATER_NAME = 'RollupCustomUpdater';
+  @SuppressWarnings('PMD.FieldNamingConventions')
   @TestVisible
   private static String PRE_AND_POST_UPDATER_NAME = 'RollupPreAndPostUpdater';
   @TestVisible
   private static final String DISPATCH_NAME = 'RollupDispatch';
-  private static final SObjectTypeSorter SORTER = new SObjectTypeSorter();
+  private static final System.Comparator<SObject> SORTER = new SObjectTypeSorter();
   @TestVisible
   private static final Map<Id, SObject> RECORDS_TO_UPDATE = new Map<Id, SObject>();
 
@@ -15,6 +18,7 @@ global without sharing virtual class RollupSObjectUpdater {
 
   private Boolean forceSyncUpdate = false;
   private RollupControl__mdt rollupControl;
+  private RollupFinalizer finalizer;
 
   global interface IDispatcher {
     void dispatch(List<SObject> records);
@@ -42,6 +46,11 @@ global without sharing virtual class RollupSObjectUpdater {
     this.forceSyncUpdate = true;
   }
 
+  public RollupSObjectUpdater setFinalizer(RollupFinalizer finalizer) {
+    this.finalizer = finalizer;
+    return this;
+  }
+
   public void updateRecords() {
     List<SObject> recordsToUpdate = RECORDS_TO_UPDATE.values();
     // static map has to be cleared BEFORE calling "doUpdate"
@@ -60,12 +69,11 @@ global without sharing virtual class RollupSObjectUpdater {
     // typically I wouldn't advocate for the use of a guard clause here since an empty list
     // getting updated is a no-op, but the addition of the logging item is annoying ...
     if (recordsToUpdate.isEmpty() == false) {
-      RollupLogger.Instance.log('updating ' + recordsToUpdate.size() + ' records', LoggingLevel.INFO);
+      RollupLogger.Instance.log('updating ' + recordsToUpdate.size() + ' records', System.LoggingLevel.INFO);
       recordsToUpdate.sort(SORTER);
       Database.DMLOptions dmlOptions = new Database.DMLOptions();
       dmlOptions.AllowFieldTruncation = true;
-      // TODO - possibly add configuration for this option as per #523
-      dmlOptions.OptAllOrNone = false;
+      dmlOptions.OptAllOrNone = this.rollupControl.ShouldThrowOnSaveErrors__c;
       if (this.rollupControl.ShouldDuplicateRulesBeIgnored__c != false) {
         dmlOptions.DuplicateRuleHeader.AllowSave = true;
       }
@@ -128,7 +136,7 @@ global without sharing virtual class RollupSObjectUpdater {
 
   private void dispatch(List<SObject> updatedRecords) {
     if (updatedRecords.isEmpty() == false && this.dispatchers.isEmpty() == false) {
-      RollupLogger.Instance.log('dispatching updated records to: ' + this.getLogString(this.dispatchers), LoggingLevel.FINE);
+      RollupLogger.Instance.log('dispatching updated records to: ' + this.getLogString(this.dispatchers), System.LoggingLevel.FINE);
       for (IDispatcher dispatcher : this.dispatchers) {
         dispatcher.dispatch(updatedRecords);
       }
@@ -168,7 +176,12 @@ global without sharing virtual class RollupSObjectUpdater {
 
   private void performAsyncUpdate(List<SObject> recordsToUpdate) {
     if (Limits.getLimitQueueableJobs() > Limits.getQueueableJobs() && recordsToUpdate.isEmpty() == false) {
-      System.enqueueJob(new RollupAsyncSaver(recordsToUpdate, this.rollupControl));
+      RollupAsyncSaver saver = new RollupAsyncSaver(this, recordsToUpdate);
+      if (this.finalizer == null) {
+        saver.runCalc();
+      } else {
+        this.finalizer.addCaboose(saver);
+      }
     }
   }
 
@@ -215,37 +228,49 @@ global without sharing virtual class RollupSObjectUpdater {
   }
 
   private class SObjectTypeSorter implements System.Comparator<SObject> {
+    private final System.Comparator<String> innerSorter = new RollupFieldInitializer.StringSorter();
     public Integer compare(SObject first, SObject second) {
-      Integer returnVal = 0;
-      String firstSObjectType = String.valueOf(first.getSObjectType());
-      String secondSObjectType = String.valueOf(second.getSObjectType());
-      if (firstSObjectType > secondSObjectType) {
-        returnVal = 1;
-      } else if (secondSObjectType > firstSObjectType) {
-        returnVal = -1;
-      }
-      return returnVal;
+      return this.innerSorter.compare('' + first.getSObjectType(), '' + second.getSObjectType());
     }
   }
 
-  private class RollupAsyncSaver implements System.Queueable {
-    private final List<SObject> records;
-    private final RollupControl__mdt control;
-    public RollupAsyncSaver(List<SObject> records, RollupControl__mdt control) {
-      this.records = records;
-      this.control = control;
+  private without sharing class RollupAsyncSaver extends RollupAsyncProcessor.QueueableProcessor {
+    private final RollupSObjectUpdater saver;
+    private RollupAsyncSaver(RollupSObjectUpdater saver, List<SObject> itemsToUpdate) {
+      super(null, itemsToUpdate, null);
+      this.finalizer = saver.finalizer;
+      this.isNoOp = itemsToUpdate.isEmpty();
+      saver.rollupControl.MaxParentRowsUpdatedAtOnce__c = 500;
+      this.saver = saver;
     }
 
-    public void execute(System.QueueableContext qc) {
-      System.attachFinalizer(new RollupFinalizer());
-      RollupSObjectUpdater updater = new RollupSObjectUpdater();
-      updater.addRollupControl(this.control);
-      new RollupSObjectUpdater().doUpdate(this.records);
+    public override String getTypeName() {
+      return RollupAsyncSaver.class.getName();
+    }
+
+    public override String runCalc() {
+      return System.enqueueJob(this);
+    }
+
+    public override Map<String, String> customizeToStringEntries(Map<String, String> props) {
+      props.remove('Invocation Point');
+      props.remove('Is Full Recalc');
+      props.remove('Is Conductor');
+      props.remove('Inner rollups');
+      props.put('Async update size', '' + this.calcItems.size());
+      return props;
+    }
+
+    protected override void performWork() {
+      RollupLogger.Instance.log('Deferred async saving starting for parent records', new Map<Id, SObject>(this.calcItems).keySet(), System.LoggingLevel.INFO);
+      this.saver.doUpdate(this.calcItems);
+      RollupLogger.Instance.log('Saving finished', System.LoggingLevel.INFO);
+      RollupLogger.Instance.save();
     }
   }
 
   private without sharing class DefaultUpdater implements IUpdater {
-    @SuppressWarnings('PMD.ApexCrudViolation')
+    @SuppressWarnings('PMD.ApexCRUDViolation')
     public void performUpdate(List<SObject> recordsToUpdate, Database.DMLOptions options) {
       List<Database.SaveResult> results = Database.update(recordsToUpdate, options);
       for (Integer index = 0; index < results.size(); index++) {
@@ -262,7 +287,7 @@ global without sharing virtual class RollupSObjectUpdater {
     }
   }
 
-  @SuppressWarnings('PMD.ApexCrudViolation')
+  @SuppressWarnings('PMD.ApexCRUDViolation')
   global without sharing class PreAndPostUpdater implements IPrePostUpdater {
     public void preUpdate(List<SObject> records, Database.DMLOptions options) {
       RollupSettings__c settings = RollupSettings__c.getInstance();

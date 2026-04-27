@@ -10,11 +10,7 @@ private class RollupFullRecalcTests {
 
   @IsTest
   static void correctlyOrdersGrandparentRollupQueryString() {
-    Rollup.defaultControl = new RollupControl__mdt(
-      IsRollupLoggingEnabled__c = true,
-      MaxLookupRowsBeforeBatching__c = 0,
-      ShouldRunAs__c = RollupMetaPicklists.ShouldRunAs.Batchable
-    );
+    Rollup.defaultControl = new RollupControl__mdt(IsRollupLoggingEnabled__c = true, MaxLookupRowsBeforeBatching__c = 0);
     insert new Contact(LastName = 'grandparent rollup query string');
 
     Rollup.performBulkFullRecalc(
@@ -35,7 +31,7 @@ private class RollupFullRecalcTests {
 
     System.assertEquals(1, Rollup.CACHED_FULL_RECALCS.size());
     List<String> queryParts = Rollup.CACHED_FULL_RECALCS.get(0).start(null).getQuery().split('\n');
-    System.assertEquals('ORDER BY ReportsTo.Account.Id,ReportsToId', queryParts.get(queryParts.size() - 1));
+    System.assertEquals('ORDER BY ReportsTo.Account.Id,ReportsToId,Id', queryParts.get(queryParts.size() - 1));
   }
 
   @IsTest
@@ -128,14 +124,14 @@ private class RollupFullRecalcTests {
 
     List<Rollup__mdt> metadata = new List<Rollup__mdt>{
       new Rollup__mdt(
-        CalcItem__c = Application__c.SObjectType.getDescribe(SObjectDescribeOptions.DEFERRED).getName(),
+        CalcItem__c = Application__c.SObjectType.toString(),
         LookupObject__c = 'Account',
         RollupToUltimateParent__c = true,
-        LookupFieldOnCalcItem__c = Application__c.ParentApplication__c.getDescribe().getName(),
+        LookupFieldOnCalcItem__c = Application__c.ParentApplication__c.toString(),
         UltimateParentLookup__c = 'ParentId',
         RollupOperation__c = 'SUM',
         RollupFieldOnLookupObject__c = 'AnnualRevenue',
-        RollupFieldOnCalcItem__c = Application__c.Engagement_Score__c.getDescribe().getName(),
+        RollupFieldOnCalcItem__c = Application__c.Engagement_Score__c.toString(),
         LookupFieldOnLookupObject__c = 'Id',
         GrandparentRelationshipFieldPath__c = RollupTestUtils.getRelationshipPath(
           new List<Schema.SObjectField>{ Application__c.ParentApplication__c, ParentApplication__c.Account__c, Account.AnnualRevenue }
@@ -172,12 +168,12 @@ private class RollupFullRecalcTests {
 
     List<Rollup__mdt> metadata = new List<Rollup__mdt>{
       new Rollup__mdt(
-        CalcItem__c = Application__c.SObjectType.getDescribe(SObjectDescribeOptions.DEFERRED).getName(),
+        CalcItem__c = Application__c.SObjectType.toString(),
         LookupObject__c = 'Individual',
-        LookupFieldOnCalcItem__c = Application__c.ParentApplication__c.getDescribe().getName(),
+        LookupFieldOnCalcItem__c = Application__c.ParentApplication__c.toString(),
         RollupOperation__c = 'SUM',
         RollupFieldOnLookupObject__c = 'ConsumerCreditScore',
-        RollupFieldOnCalcItem__c = Application__c.Engagement_Score__c.getDescribe().getName(),
+        RollupFieldOnCalcItem__c = Application__c.Engagement_Score__c.toString(),
         LookupFieldOnLookupObject__c = 'Id',
         GrandparentRelationshipFieldPath__c = String.valueOf(Application__c.ParentApplication__c).replace('__r', '__c') +
           '.' +
@@ -525,6 +521,50 @@ private class RollupFullRecalcTests {
   }
 
   @IsTest
+  static void shouldMapChildrenWithDifferentGrandparentWhereClauses() {
+    Account acc = [SELECT Id, OwnerId FROM Account];
+    List<Event> events = new List<Event>{
+      new Event(WhatId = acc.Id, Subject = 'Two', ActivityDatetime = System.now(), DurationInMinutes = 30),
+      new Event(WhatId = acc.Id, Subject = 'One', ActivityDatetime = System.now(), DurationInMinutes = 60)
+    };
+    insert events;
+
+    Rollup.defaultControl = Rollup.getDefaultControl();
+    Rollup.rollupMetadata = new List<Rollup__mdt>{
+      new Rollup__mdt(
+        CalcItem__c = 'Event',
+        RollupFieldOnCalcItem__c = 'Subject',
+        LookupFieldOnCalcItem__c = 'WhatId',
+        LookupObject__c = 'User',
+        LookupFieldOnLookupObject__c = 'Id',
+        RollupFieldOnLookupObject__c = 'AboutMe',
+        RollupOperation__c = 'CONCAT',
+        GrandparentRelationshipFieldPath__c = 'What.Owner.AboutMe',
+        CalcItemWhereClause__c = 'DurationInMinutes <= 30'
+      ),
+      new Rollup__mdt(
+        CalcItem__c = 'Event',
+        RollupFieldOnCalcItem__c = 'Subject',
+        LookupFieldOnCalcItem__c = 'WhatId',
+        LookupObject__c = 'User',
+        LookupFieldOnLookupObject__c = 'Id',
+        RollupFieldOnLookupObject__c = 'CompanyName',
+        RollupOperation__c = 'CONCAT',
+        GrandparentRelationshipFieldPath__c = 'What.Owner.CompanyName',
+        CalcItemWhereClause__c = 'DurationInMinutes > 30'
+      )
+    };
+
+    Test.startTest();
+    Rollup.performBulkFullRecalc(Rollup.rollupMetadata, Rollup.InvocationPoint.FROM_FULL_RECALC_LWC.name());
+    Test.stopTest();
+
+    User updatedUser = [SELECT AboutMe, CompanyName FROM User WHERE Id = :acc.OwnerId];
+    System.assertEquals(events[0].Subject, updatedUser.AboutMe);
+    System.assertEquals(events[1].Subject, updatedUser.CompanyName);
+  }
+
+  @IsTest
   static void shouldAllowGrandparentRollupFromParentWithPolymorphicFields() {
     // technically shouldAllowGrandparentRollupsFromParent also tests polymorphic fields
     // this test does that in conjunction with a more complicated where clause
@@ -672,7 +712,14 @@ private class RollupFullRecalcTests {
 
     acc = [SELECT AnnualRevenue FROM Account];
     System.assertEquals(6, acc.AnnualRevenue);
-    System.assertEquals('Completed', [SELECT Status FROM AsyncApexJob WHERE JobType = 'Queueable' LIMIT 1]?.Status);
+    System.assertEquals(
+      1,
+      [
+        SELECT COUNT()
+        FROM AsyncApexJob
+        WHERE JobType = 'Queueable' AND ApexClass.Name = :RollupTestUtils.getNamespaceSafeClassName(RollupDeferredFullRecalcProcessor.class)
+      ]
+    );
   }
 
   @IsTest
@@ -850,11 +897,27 @@ private class RollupFullRecalcTests {
     for (Account account : accounts) {
       System.assertEquals(account.Id == acc.Id ? 6 : 1, account.AnnualRevenue);
     }
-    System.assertEquals('Completed', [SELECT Status FROM AsyncApexJob WHERE JobType = 'Queueable' LIMIT 1]?.Status);
+    System.assertEquals(
+      1,
+      [
+        SELECT COUNT()
+        FROM AsyncApexJob
+        WHERE JobType = 'Queueable' AND ApexClass.Name = :RollupTestUtils.getNamespaceSafeClassName(RollupDeferredFullRecalcProcessor.class)
+      ]
+    );
   }
 
   @IsTest
   static void shouldBatchForFullRecalcWhenOverLimits() {
+    Rollup.defaultControl = new RollupControl__mdt(
+      // prove that it works with multiple chunks
+      BatchChunkSize__c = 2,
+      MaxLookupRowsBeforeBatching__c = 1,
+      // validate that it still batches
+      ShouldRunAs__c = RollupMetaPicklists.ShouldRunAs.Queueable,
+      IsRollupLoggingEnabled__c = true
+    );
+
     Account acc = [SELECT Id FROM Account];
     acc.AnnualRevenue = 5; // validate that the pre-existing value is cleared
     update acc;
@@ -868,12 +931,6 @@ private class RollupFullRecalcTests {
       new ContactPointAddress(Name = 'sixBatch', ParentId = acc.Id, PreferenceRank = 1)
     };
     insert cpas;
-
-    Rollup.defaultControl = new RollupControl__mdt(
-      MaxLookupRowsBeforeBatching__c = 1,
-      ShouldRunAs__c = RollupMetaPicklists.ShouldRunAs.Queueable, // validate that it still batches
-      IsRollupLoggingEnabled__c = true
-    );
 
     Rollup__mdt meta = new Rollup__mdt(
       CalcItem__c = 'ContactPointAddress',
@@ -892,11 +949,26 @@ private class RollupFullRecalcTests {
 
     acc = [SELECT AnnualRevenue FROM Account];
     System.assertEquals(6, acc.AnnualRevenue);
-    System.assertEquals('Completed', [SELECT Status FROM AsyncApexJob WHERE JobType = 'BatchApexWorker'].Status);
+    System.assertEquals(
+      1,
+      [
+        SELECT COUNT()
+        FROM AsyncApexJob
+        WHERE JobType = 'Queueable' AND ApexClass.Name = :RollupTestUtils.getNamespaceSafeClassName(RollupFullBatchRecalculator.class)
+        LIMIT 1
+      ]
+    );
   }
 
   @IsTest
   static void shouldUseSmallerBatchSizeWhenSpecificRollupControlLowerThanOrgDefaults() {
+    Rollup.defaultControl = new RollupControl__mdt(
+      MaxLookupRowsBeforeBatching__c = 1,
+      // validate that it still batches
+      ShouldRunAs__c = RollupMetaPicklists.ShouldRunAs.Queueable,
+      IsRollupLoggingEnabled__c = true
+    );
+    Rollup.specificControl = new RollupControl__mdt(BatchChunkSize__c = 1);
     Account acc = [SELECT Id FROM Account];
     Account secondAccount = new Account(Name = 'Second');
     insert secondAccount;
@@ -911,13 +983,6 @@ private class RollupFullRecalcTests {
       new ContactPointAddress(Name = 'secondAccount', ParentId = secondAccount.Id, PreferenceRank = 1)
     };
     insert cpas;
-
-    Rollup.defaultControl = new RollupControl__mdt(
-      MaxLookupRowsBeforeBatching__c = 1,
-      ShouldRunAs__c = RollupMetaPicklists.ShouldRunAs.Queueable, // validate that it still batches
-      IsRollupLoggingEnabled__c = true
-    );
-    Rollup.specificControl = new RollupControl__mdt(BatchChunkSize__c = 1);
 
     Rollup__mdt meta = new Rollup__mdt(
       CalcItem__c = 'ContactPointAddress',
@@ -934,11 +999,14 @@ private class RollupFullRecalcTests {
     Rollup.performFullRecalculation(meta);
     Test.stopTest();
 
-    List<AsyncApexJob> jobs = [SELECT Status, JobItemsProcessed FROM AsyncApexJob WHERE JobType = 'BatchApexWorker'];
+    List<AsyncApexJob> jobs = [
+      SELECT Status
+      FROM AsyncApexJob
+      WHERE JobType = 'Queueable' AND ApexClass.Name = :RollupTestUtils.getNamespaceSafeClassName(RollupFullBatchRecalculator.class)
+    ];
     System.assertEquals(false, jobs.isEmpty());
     for (AsyncApexJob job : jobs) {
       System.assertEquals('Completed', job.Status);
-      System.assertEquals(1, job.JobItemsProcessed);
     }
   }
 
@@ -987,6 +1055,14 @@ private class RollupFullRecalcTests {
 
   @IsTest
   static void doesNotClearParentFieldsWhenFullRecalcIsDeferred() {
+    Rollup.defaultControl = new RollupControl__mdt(
+      MaxLookupRowsBeforeBatching__c = 50,
+      MaxNumberOfQueries__c = 2, // set to explicitly be too low for rollup to proceed
+      ShouldRunAs__c = RollupMetaPicklists.ShouldRunAs.Synchronous,
+      IsRollupLoggingEnabled__c = true,
+      MaxParentRowsUpdatedAtOnce__c = 10,
+      MaxRollupRetries__c = -1 // don't actually allow the deferral
+    );
     Account acc = [SELECT Id FROM Account]; // 1 query
     acc.AnnualRevenue = acc.NumberOfEmployees = 5;
     update acc;
@@ -1001,14 +1077,6 @@ private class RollupFullRecalcTests {
     };
     insert cpas;
 
-    Rollup.defaultControl = new RollupControl__mdt(
-      MaxLookupRowsBeforeBatching__c = 50,
-      MaxNumberOfQueries__c = 2, // set to explicitly be too low for rollup to proceed
-      ShouldRunAs__c = RollupMetaPicklists.ShouldRunAs.Synchronous,
-      IsRollupLoggingEnabled__c = true,
-      MaxParentRowsUpdatedAtOnce__c = 10,
-      MaxRollupRetries__c = -1 // don't actually allow the deferral
-    );
     // rollups are processed in reverse order
     Rollup__mdt countRollup = new Rollup__mdt(
       CalcItem__c = 'ContactPointAddress',
@@ -1150,12 +1218,12 @@ private class RollupFullRecalcTests {
 
     List<Rollup__mdt> metas = new List<Rollup__mdt>{
       new Rollup__mdt(
-        CalcItem__c = RollupChild__c.SObjectType.getDescribe(SObjectDescribeOptions.DEFERRED).getName(),
-        RollupFieldOnCalcItem__c = RollupChild__c.NumberField__c.getDescribe().getName(),
-        LookupFieldOnCalcItem__c = RollupChild__c.RollupParent__c.getDescribe().getName(),
-        LookupObject__c = RollupGrandparent__c.SObjectType.getDescribe(SObjectDescribeOptions.DEFERRED).getName(),
-        LookupFieldOnLookupObject__c = RollupGrandparent__c.Id.getDescribe().getName(),
-        RollupFieldOnLookupObject__c = RollupGrandparent__c.AmountFromChildren__c.getDescribe().getName(),
+        CalcItem__c = RollupChild__c.SObjectType.toString(),
+        RollupFieldOnCalcItem__c = RollupChild__c.NumberField__c.toString(),
+        LookupFieldOnCalcItem__c = RollupChild__c.RollupParent__c.toString(),
+        LookupObject__c = RollupGrandparent__c.SObjectType.toString(),
+        LookupFieldOnLookupObject__c = RollupGrandparent__c.Id.toString(),
+        RollupFieldOnLookupObject__c = RollupGrandparent__c.AmountFromChildren__c.toString(),
         RollupOperation__c = 'SUM',
         CalcItemWhereClause__c = ' ||| ' +
           RollupTestUtils.getRelationshipPath(
@@ -1178,7 +1246,8 @@ private class RollupFullRecalcTests {
 
   @IsTest
   static void shouldNotBlowUpOnMassiveQuery() {
-    String endOfWhereClause = '2'.repeat(100001);
+    Integer maxLength = ContactPointAddress.PreferenceRank.getDescribe().getDigits();
+    String endOfWhereClause = '2'.repeat(maxLength);
     Rollup__mdt meta = new Rollup__mdt(
       CalcItem__c = 'ContactPointAddress',
       RollupFieldOnCalcItem__c = 'PreferenceRank',
@@ -1187,7 +1256,7 @@ private class RollupFullRecalcTests {
       RollupFieldOnLookupObject__c = 'AnnualRevenue',
       LookupObject__c = 'Account',
       RollupOperation__c = 'SUM',
-      CalcItemWhereClause__c = 'PreferenceRank = ' + endOfWhereClause
+      CalcItemWhereClause__c = ('PreferenceRank = ' + endOfWhereClause + ' AND ').repeat(200).removeEnd(' AND ')
     );
 
     Test.startTest();
@@ -1445,7 +1514,7 @@ private class RollupFullRecalcTests {
   }
 
   @IsTest
-  static void shouldResetParentValuesWithoutMatchingChildrenFromBulkRouteUnderQueryLimit() {
+  static void shouldResetParentValuesWithoutMatchingChildrenFromBulkRouteUnderQueryLimitSync() {
     Account acc = [SELECT Id FROM Account];
     acc.AccountNumber = 'someString';
     acc.AnnualRevenue = 5;
@@ -1477,9 +1546,7 @@ private class RollupFullRecalcTests {
       )
     };
 
-    Test.startTest();
     Rollup.performBulkFullRecalc(metas, Rollup.InvocationPoint.FROM_FULL_RECALC_LWC.name());
-    Test.stopTest();
 
     List<Account> accounts = [SELECT AccountNumber, AnnualRevenue, Name FROM Account];
     for (Account updatedAcc : accounts) {
@@ -1560,12 +1627,21 @@ private class RollupFullRecalcTests {
       System.assertEquals(null, updatedAcc.AnnualRevenue, 'AnnualRevenue should have been reset: ' + updatedAcc);
       System.assertEquals(null, updatedAcc.AccountNumber, 'AccountNumber should have been reset: ' + updatedAcc);
     }
+    System.assertEquals(
+      'Completed',
+      [
+        SELECT Status
+        FROM AsyncApexJob
+        WHERE JobType = 'Queueable' AND ApexClass.Name = :RollupTestUtils.getNamespaceSafeClassName(RollupParentResetProcessor.class)
+        LIMIT 1
+      ]
+      ?.Status
+    );
   }
 
   @IsTest
   static void shouldResetParentValuesWithoutMatchingChildrenFromBulkRouteOverLimitWithBatching() {
     RollupParentResetProcessor.maxQueryRows = 0;
-    Rollup.defaultControl = new RollupControl__mdt(ShouldRunAs__c = RollupMetaPicklists.ShouldRunAs.Batchable, IsRollupLoggingEnabled__c = true);
     Account acc = [SELECT Id FROM Account];
     acc.AccountNumber = 'someString';
     acc.AnnualRevenue = 5;
@@ -1601,12 +1677,9 @@ private class RollupFullRecalcTests {
     Rollup.performBulkFullRecalc(metas, Rollup.InvocationPoint.FROM_FULL_RECALC_LWC.name());
     Test.stopTest();
 
-    List<Account> accounts = [SELECT AnnualRevenue, Name FROM Account];
+    List<Account> accounts = [SELECT AnnualRevenue, Name, AccountNumber FROM Account];
     for (Account updatedAcc : accounts) {
-      // for this set of tests, since we can't add more than one queueable job to the stack in a test context
-      // and because each full reset is processed separately, we can only validate that the first Rollup__mdt record
-      // had the parents associated with it reset. It's possible that this will be revisited in the future to consolidate full
-      // resets into singular jobs
+      System.assertEquals(null, updatedAcc.AccountNumber, 'AccountNumber should have been reset: ' + updatedAcc);
       System.assertEquals(null, updatedAcc.AnnualRevenue, 'AnnualRevenue should have been reset: ' + updatedAcc);
     }
   }
@@ -1624,7 +1697,7 @@ private class RollupFullRecalcTests {
 
     RollupFullBatchRecalculator fullRecalc = new RollupFullBatchRecalculator(
       'SELECT Id, PreferenceRank, ParentId FROM ContactPointAddress',
-      Rollup.InvocationPoint.FROM_APEX,
+      Rollup.InvocationPoint.FROM_FULL_RECALC_LWC,
       new List<Rollup__mdt>{
         new Rollup__mdt(
           CalcItem__c = 'ContactPointAddress',
@@ -1664,7 +1737,7 @@ private class RollupFullRecalcTests {
 
     RollupFullBatchRecalculator fullRecalc = new RollupFullBatchRecalculator(
       'SELECT Id, PreferenceRank, ParentId FROM ContactPointAddress',
-      Rollup.InvocationPoint.FROM_APEX,
+      Rollup.InvocationPoint.FROM_FULL_RECALC_LWC,
       new List<Rollup__mdt>{
         new Rollup__mdt(
           CalcItem__c = 'ContactPointAddress',
@@ -1693,8 +1766,8 @@ private class RollupFullRecalcTests {
 
   @IsTest
   static void limitsFullBatchRecalcCachedItemsProperly() {
-    Rollup.defaultControl = new RollupControl__mdt(ShouldRunAs__c = RollupMetaPicklists.ShouldRunAs.Synchronous);
-    Account parentA = [SELECT Id FROM Account];
+    Rollup.defaultControl = new RollupControl__mdt(ShouldRunAs__c = RollupMetaPicklists.ShouldRunAs.Synchronous, IsRollupLoggingEnabled__c = true);
+    Account parentA = [SELECT Id, OwnerId FROM Account];
     Account parentB = new Account(Name = 'Parent B');
     Account parentC = new Account(Name = 'Parent C');
     insert new List<SObject>{ parentB, parentC };
@@ -1723,7 +1796,22 @@ private class RollupFullRecalcTests {
           LookupObject__c = 'Account',
           LookupFieldOnLookupObject__c = 'Id',
           RollupFieldOnLookupObject__c = 'AnnualRevenue',
-          RollupOperation__c = 'SUM'
+          RollupOperation__c = 'SUM',
+          FullRecalculationDefaultNumberValue__c = 0,
+          IsFullRecordSet__c = true
+        ),
+        new Rollup__mdt(
+          CalcItem__c = 'ContactPointAddress',
+          RollupFieldOnCalcItem__c = 'Name',
+          LookupFieldOnCalcItem__c = 'ParentId',
+          LookupObject__c = 'User',
+          LookupFieldOnLookupObject__c = 'Id',
+          RollupFieldOnLookupObject__c = 'Alias',
+          GrandparentRelationshipFieldPath__c = 'Parent.Owner.Alias',
+          RollupOperation__c = 'MIN',
+          CalcItemWhereClause__c = 'ParentId = \'' + parentA.Id + '\'',
+          FullRecalculationDefaultStringValue__c = '',
+          IsFullRecordSet__c = true
         ),
         new Rollup__mdt(
           CalcItem__c = 'ContactPointAddress',
@@ -1772,12 +1860,116 @@ private class RollupFullRecalcTests {
       System.assertEquals(String.valueOf(true), parent.Sic, parent);
     }
     System.assertEquals(true, Rollup.CACHED_ROLLUPS.isEmpty(), 'all deferrals should have been run');
+    User parentAOwner = [SELECT Id, Alias FROM User WHERE Id = :parentA.OwnerId];
+    System.assertEquals('One A', parentAOwner.Alias);
+  }
+
+  @IsTest
+  static void multipleParentRollupsMultipleBatchesStoreStateProperly() {
+    Rollup.defaultControl = new RollupControl__mdt(ShouldRunAs__c = RollupMetaPicklists.ShouldRunAs.Synchronous, IsRollupLoggingEnabled__c = true);
+    Account parentA = [SELECT Id FROM Account];
+    Individual parentB = new Individual(LastName = 'Parent B');
+    Individual unrelatedParent = new Individual(LastName = 'Unrelated');
+    Opportunity parentC = new Opportunity(Name = 'Parent C', StageName = 'Test', CloseDate = System.today());
+    insert new List<SObject>{ parentB, parentC, unrelatedParent };
+
+    List<ContactPointAddress> cpas = new List<ContactPointAddress>{
+      new ContactPointAddress(ParentId = parentA.Id, PreferenceRank = 1, Name = 'One A', UsageType = '1'),
+      new ContactPointAddress(ParentId = parentB.Id, PreferenceRank = 1, Name = 'One B', UsageType = '1'),
+      new ContactPointAddress(ParentId = unrelatedParent.Id, PreferenceRank = 1, Name = parentC.Id, UsageType = '1'),
+      new ContactPointAddress(ParentId = parentA.Id, PreferenceRank = 2, Name = 'Two A', UsageType = '1'),
+      new ContactPointAddress(ParentId = parentB.Id, PreferenceRank = 8, Name = 'Two B', UsageType = '1'),
+      new ContactPointAddress(ParentId = unrelatedParent.Id, PreferenceRank = 7, Name = parentC.Id, UsageType = '1'),
+      new ContactPointAddress(ParentId = parentA.Id, PreferenceRank = 3, Name = 'Three A', UsageType = '2'),
+      new ContactPointAddress(ParentId = parentB.Id, PreferenceRank = 3, Name = 'Three B', UsageType = '2'),
+      new ContactPointAddress(ParentId = unrelatedParent.Id, PreferenceRank = 2, Name = parentC.Id, UsageType = '2')
+    };
+    insert cpas;
+
+    RollupFullBatchRecalculator fullRecalc = new RollupFullBatchRecalculator(
+      'SELECT Id, PreferenceRank, ParentId, Name FROM ContactPointAddress ORDER BY ParentId, Name',
+      Rollup.InvocationPoint.FROM_FULL_RECALC_LWC,
+      new List<Rollup__mdt>{
+        new Rollup__mdt(
+          CalcItem__c = 'ContactPointAddress',
+          RollupFieldOnCalcItem__c = 'PreferenceRank',
+          LookupFieldOnCalcItem__c = 'ParentId',
+          LookupObject__c = 'Account',
+          LookupFieldOnLookupObject__c = 'Id',
+          RollupFieldOnLookupObject__c = 'AnnualRevenue',
+          RollupOperation__c = 'SUM'
+        ),
+        new Rollup__mdt(
+          CalcItem__c = 'ContactPointAddress',
+          RollupFieldOnCalcItem__c = 'PreferenceRank',
+          LookupFieldOnCalcItem__c = 'ParentId',
+          LookupObject__c = 'Individual',
+          LookupFieldOnLookupObject__c = 'Id',
+          RollupFieldOnLookupObject__c = 'ConsumerCreditScore',
+          RollupOperation__c = 'SUM'
+        ),
+        new Rollup__mdt(
+          CalcItem__c = 'ContactPointAddress',
+          RollupFieldOnCalcItem__c = 'PreferenceRank',
+          LookupFieldOnCalcItem__c = 'Name',
+          LookupObject__c = 'Opportunity',
+          LookupFieldOnLookupObject__c = 'Id',
+          RollupFieldOnLookupObject__c = 'Amount',
+          RollupOperation__c = 'MAX'
+        ),
+        new Rollup__mdt(
+          CalcItem__c = 'ContactPointAddress',
+          RollupFieldOnCalcItem__c = 'UsageType',
+          LookupFieldOnCalcItem__c = 'ParentId',
+          LookupObject__c = 'Account',
+          LookupFieldOnLookupObject__c = 'Id',
+          RollupFieldOnLookupObject__c = 'Sic',
+          RollupOperation__c = 'SOME',
+          CalcItemWhereClause__c = 'PreferenceRank = 2'
+        )
+      },
+      ContactPointAddress.SObjectType,
+      new Set<String>(),
+      null
+    );
+
+    Test.startTest();
+    fullRecalc.execute(null, new List<ContactPointAddress>{ cpas[0], cpas[1], cpas[2] });
+    fullRecalc.execute(null, new List<ContactPointAddress>{ cpas[3], cpas[4], cpas[5] });
+    fullRecalc.execute(null, new List<ContactPointAddress>{ cpas[6], cpas[7], cpas[8] });
+    Test.stopTest();
+
+    parentA = [SELECT AnnualRevenue, Description, NumberOfEmployees, Name, Sic FROM Account WHERE Id = :parentA.Id];
+    System.assertEquals(6, parentA.AnnualRevenue);
+    System.assertEquals('true', parentA.Sic);
+    parentB = [SELECT ConsumerCreditScore FROM Individual WHERE Id = :parentB.Id];
+    System.assertEquals(12, parentB.ConsumerCreditScore);
+    parentC = [SELECT Amount FROM Opportunity WHERE Id = :parentC.Id];
+    System.assertEquals(7, parentC.Amount);
+
+    System.assertEquals(true, Rollup.CACHED_ROLLUPS.isEmpty(), 'all deferrals should have been run');
+  }
+
+  @IsTest
+  static void shouldUseJSONSerializationStrategyWhenEnabled() {
+    Rollup.defaultControl = new RollupControl__mdt(ShouldUseJSONSerializationStrategy__c = true);
+
+    RollupFullBatchRecalculator fullRecalc = new RollupFullBatchRecalculator(
+      'SELECT Id, PreferenceRank, ParentId, Name FROM ContactPointAddress ORDER BY ParentId, Name',
+      Rollup.InvocationPoint.FROM_FULL_RECALC_LWC,
+      new List<Rollup__mdt>(),
+      ContactPointAddress.SObjectType,
+      new Set<String>(),
+      null
+    );
+    fullRecalc.getState();
+
+    Assert.areEqual(RollupState.JSONSerializationStrategy.class, RollupState.serializationStrategy.getType());
   }
 
   @IsTest
   static void shouldFullRecalcWithInWhereClauses() {
     RollupParentResetProcessor.maxQueryRows = 0;
-    Rollup.defaultControl = new RollupControl__mdt(ShouldRunAs__c = RollupMetaPicklists.ShouldRunAs.Batchable);
     Account acc = [SELECT Id FROM Account];
 
     insert new List<Opportunity>{
@@ -1804,6 +1996,37 @@ private class RollupFullRecalcTests {
 
     acc = [SELECT AnnualRevenue FROM Account];
     System.assertEquals(2, acc.AnnualRevenue);
+  }
+
+  @IsTest
+  static void shouldAddStateRecordAtStartOfFullRecalc() {
+    Account acc = [SELECT Id FROM Account];
+    insert new List<Opportunity>{ new Opportunity(StageName = 'fullRecalc', CloseDate = System.today(), AccountId = acc.Id, Name = 'fullRecalc', Amount = 1) };
+
+    Rollup.defaultControl = new RollupControl__mdt(
+      MaxLookupRowsBeforeBatching__c = 0,
+      BatchChunkSize__c = 2,
+      IsRollupLoggingEnabled__c = true,
+      Id = RollupTestUtils.createId(RollupControl__mdt.SObjectType)
+    );
+    List<Rollup__mdt> metas = new List<Rollup__mdt>{
+      new Rollup__mdt(
+        CalcItem__c = 'Opportunity',
+        RollupFieldOnCalcItem__c = 'Amount',
+        LookupFieldOnCalcItem__c = 'AccountId',
+        LookupObject__c = 'Account',
+        LookupFieldOnLookupObject__c = 'Id',
+        RollupFieldOnLookupObject__c = 'AnnualRevenue',
+        RollupOperation__c = 'SUM',
+        RollupControl__c = Rollup.defaultControl.Id
+      )
+    };
+
+    // purposefully do not use start/stopTest to ensure job does not finish running
+    String jobId = Rollup.performBulkFullRecalc(metas, Rollup.InvocationPoint.FROM_FULL_RECALC_LWC.name());
+
+    Assert.areEqual(1, [SELECT COUNT() FROM AsyncApexJob WHERE ApexClass.Name = :RollupTestUtils.getNamespaceSafeClassName(RollupFullBatchRecalculator.class)]);
+    Assert.areEqual(1, [SELECT COUNT() FROM RollupState__c WHERE RelatedJobId__c = :jobId], 'Must populate rollup state');
   }
 
   @IsTest
@@ -2140,7 +2363,7 @@ private class RollupFullRecalcTests {
   }
 
   @IsTest
-  static void addsCabooseForMultiplFullRecalcsToDifferentParents() {
+  static void addsCabooseForMultipleFullRecalcsToDifferentParents() {
     // when there are multiple children types passed to Rollup.performBulkFullRecalc (or any other method ending in a full recalc),
     // and there are multiple instances of the full batch recalcs that are present in the list of rollups
     Rollup.defaultControl = new RollupControl__mdt(MaxRollupRetries__c = 100, MaxLookupRowsBeforeBatching__c = 2, IsRollupLoggingEnabled__c = true);
@@ -2202,14 +2425,13 @@ private class RollupFullRecalcTests {
     Test.stopTest();
 
     Assert.areEqual(
-      1,
-      [SELECT COUNT() FROM AsyncApexJob WHERE JobType = 'Queueable' AND ApexClass.Name = :getNamespaceSafeClassName(RollupAsyncProcessor.class)],
-      'Conductor should begin async as queueable'
-    );
-    Assert.areEqual(
       2,
-      [SELECT COUNT() FROM AsyncApexJob WHERE JobType = 'BatchApexWorker' AND ApexClass.Name = :getNamespaceSafeClassName(RollupFullBatchRecalculator.class)],
-      'Only two batch classes should have run'
+      [
+        SELECT COUNT()
+        FROM AsyncApexJob
+        WHERE JobType = 'Queueable' AND ApexClass.Name = :RollupTestUtils.getNamespaceSafeClassName(RollupFullBatchRecalculator.class)
+      ],
+      'Exactly two batch full recalcs should have run'
     );
     parentOne = [SELECT AnnualRevenue, Description, NumberOfEmployees FROM Account WHERE Id = :parentOne.Id];
     Assert.areEqual(childOne.PreferenceRank, parentOne.AnnualRevenue);
@@ -2219,10 +2441,11 @@ private class RollupFullRecalcTests {
     Assert.areEqual(null, parentTwo.AnnualRevenue);
     Assert.areEqual('Concat, Two', parentTwo.Description);
     Assert.areEqual(10, parentTwo.NumberOfEmployees);
+    Assert.areEqual(0, [SELECT COUNT() FROM RollupState__c], '' + [SELECT COUNT(Id), RelatedJobId__c FROM RollupState__c GROUP BY RelatedJobId__c]);
   }
 
   @IsTest
-  static void addsCabooseForMultiplFullRecalcsToDifferentParentsWithoutOtherRollups() {
+  static void addsCabooseForMultipleFullRecalcsToDifferentParentsWithoutOtherRollups() {
     // when there are multiple children types passed to Rollup.performBulkFullRecalc (or any other method ending in a full recalc),
     // and there are multiple instances of the full batch recalcs that are present in the list of rollups
     Rollup.defaultControl = new RollupControl__mdt(MaxRollupRetries__c = 100, MaxLookupRowsBeforeBatching__c = 2, IsRollupLoggingEnabled__c = true);
@@ -2286,8 +2509,12 @@ private class RollupFullRecalcTests {
 
     Assert.areEqual(
       2,
-      [SELECT COUNT() FROM AsyncApexJob WHERE JobType = 'BatchApexWorker' AND ApexClass.Name = :getNamespaceSafeClassName(RollupFullBatchRecalculator.class)],
-      'Only two batch classes should have run'
+      [
+        SELECT COUNT()
+        FROM AsyncApexJob
+        WHERE JobType = 'Queueable' AND ApexClass.Name = :RollupTestUtils.getNamespaceSafeClassName(RollupFullBatchRecalculator.class)
+      ],
+      'Exactly two batch full recalcs should have run'
     );
     parentOne = [SELECT AnnualRevenue, Description, NumberOfEmployees FROM Account WHERE Id = :parentOne.Id];
     Assert.areEqual(childOne.PreferenceRank, parentOne.AnnualRevenue);
@@ -2297,6 +2524,7 @@ private class RollupFullRecalcTests {
     Assert.areEqual(null, parentTwo.AnnualRevenue);
     Assert.areEqual('Concat, Two', parentTwo.Description);
     Assert.areEqual(10, parentTwo.NumberOfEmployees);
+    Assert.areEqual(0, [SELECT COUNT() FROM RollupState__c]);
   }
 
   @IsTest
@@ -2304,9 +2532,14 @@ private class RollupFullRecalcTests {
     // an interesting one because it's again an implementation detail - this time,
     // of the batch "caboose" process. if the full recalc is BELOW the batch limit,
     // the queueable will already correctly handle everything since the shared parent field will only be reset once.
-    // batch processes, on the other hand, would otherwise simply see the existing value on the parent as something
+    // batch queueables, on the other hand, would otherwise simply see the existing value on the parent as something
     // that needs to be cleared out
-    Rollup.defaultControl = new RollupControl__mdt(MaxRollupRetries__c = 100, MaxLookupRowsBeforeBatching__c = 1, IsRollupLoggingEnabled__c = true);
+    Rollup.defaultControl = new RollupControl__mdt(
+      MaxRollupRetries__c = 100,
+      MaxLookupRowsBeforeBatching__c = 1,
+      IsRollupLoggingEnabled__c = true,
+      BatchChunkSize__c = 3
+    );
     Rollup.onlyUseMockMetadata = true;
     Account parent = [SELECT Id FROM Account];
 
@@ -2353,12 +2586,17 @@ private class RollupFullRecalcTests {
 
     Assert.areEqual(
       2,
-      [SELECT COUNT() FROM AsyncApexJob WHERE JobType = 'BatchApexWorker' AND ApexClass.Name = :getNamespaceSafeClassName(RollupFullBatchRecalculator.class)],
-      'Test requires batch apex to have been the full recalc mechanism'
+      [
+        SELECT COUNT()
+        FROM AsyncApexJob
+        WHERE JobType = 'Queueable' AND ApexClass.Name = :RollupTestUtils.getNamespaceSafeClassName(RollupFullBatchRecalculator.class)
+      ],
+      'Test requires RollupFullBatchRecalculator to have been used'
     );
     parent = [SELECT AnnualRevenue, NumberOfEmployees FROM Account WHERE Id = :parent.Id];
     Assert.areEqual(40, parent.AnnualRevenue, 'Both children types should have correctly summed to one field in batch recalc');
     Assert.areEqual(25, parent.NumberOfEmployees, 'Additional field on parent should have been queried successfully in second rollup');
+    Assert.areEqual(0, [SELECT COUNT() FROM RollupState__c]);
   }
 
   @IsTest
@@ -2403,19 +2641,15 @@ private class RollupFullRecalcTests {
 
     Assert.areEqual(
       1,
-      [SELECT COUNT() FROM AsyncApexJob WHERE JobType = 'Queueable' AND ApexClass.Name = :getNamespaceSafeClassName(RollupAsyncProcessor.class)],
+      [
+        SELECT COUNT()
+        FROM AsyncApexJob
+        WHERE JobType = 'Queueable' AND ApexClass.Name = :RollupTestUtils.getNamespaceSafeClassName(RollupDeferredFullRecalcProcessor.class)
+      ],
       JSON.serializePretty([SELECT JobType, ApexClass.Name FROM AsyncApexJob])
     );
     parent = [SELECT AnnualRevenue FROM Account WHERE Id = :parent.Id];
     Assert.areEqual(40, parent.AnnualRevenue, 'Both children types should have correctly summed to one field in full recalc');
-  }
-
-  private static String getNamespaceSafeClassName(Type intendedClass) {
-    List<String> classNameParts = intendedClass.getName().split('\\.');
-    if (classNameParts.size() > 1) {
-      classNameParts.remove(0);
-    }
-    return classNameParts[0];
   }
 
   private class DeferredContactPointAddressRollup extends RollupDeferredFullRecalcProcessor {
@@ -2431,5 +2665,52 @@ private class RollupFullRecalcTests {
       this.isNoOp = false;
       this.queryCount = 1;
     }
+  }
+
+  @IsTest
+  static void shouldNotResetNonMatchingParentsWhenMultipleParentTypesArePresent() {
+    Rollup.defaultControl = new RollupControl__mdt(IsRollupLoggingEnabled__c = true, ShouldSkipResettingParentFields__c = true);
+    Rollup.onlyUseMockMetadata = true;
+    Account parent = [SELECT Id FROM Account];
+    Individual indy = new Individual(FirstName = 'Test', LastName = 'User', ConsumerCreditScore = 25);
+    insert indy;
+
+    insert new List<SObject>{
+      new ContactPointAddress(ParentId = parent.Id, Name = 'child 1 first object', PreferenceRank = 25),
+      new ContactPointAddress(ParentId = indy.Id, Name = indy.Id, PreferenceRank = 25)
+    };
+
+    Test.startTest();
+    Rollup.performBulkFullRecalc(
+      new List<Rollup__mdt>{
+        new Rollup__mdt(
+          CalcItem__c = 'ContactPointAddress',
+          LookupFieldOnCalcItem__c = 'Name',
+          RollupFieldOnCalcItem__c = 'PreferenceRank',
+          RollupOperation__c = 'SUM',
+          LookupObject__c = 'Individual',
+          LookupFieldOnLookupObject__c = 'Id',
+          RollupFieldOnLookupObject__c = 'ConsumerCreditScore',
+          CalcItemWhereClause__c = 'PreferenceRank != 25',
+          FullRecalculationDefaultNumberValue__c = 0
+        ),
+        new Rollup__mdt(
+          CalcItem__c = 'ContactPointAddress',
+          LookupFieldOnCalcItem__c = 'ParentId',
+          RollupFieldOnCalcItem__c = 'PreferenceRank',
+          RollupOperation__c = 'SUM',
+          LookupObject__c = 'Account',
+          LookupFieldOnLookupObject__c = 'Id',
+          RollupFieldOnLookupObject__c = 'AnnualRevenue',
+          CalcItemWhereClause__c = 'PreferenceRank = 25',
+          FullRecalculationDefaultNumberValue__c = 0
+        )
+      },
+      Rollup.InvocationPoint.FROM_FULL_RECALC_LWC.name()
+    );
+    Test.stopTest();
+
+    Assert.areEqual(25, [SELECT AnnualRevenue FROM Account WHERE Id = :parent.Id].AnnualRevenue);
+    Assert.areEqual(25, [SELECT ConsumerCreditScore FROM Individual WHERE Id = :indy.Id].ConsumerCreditScore);
   }
 }

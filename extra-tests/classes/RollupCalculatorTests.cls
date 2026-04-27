@@ -1,3 +1,4 @@
+@SuppressWarnings('PMD.NcssTypeCount')
 @IsTest
 private class RollupCalculatorTests {
   // use these tests when DML is not required, or only *light* DML is necessary
@@ -239,46 +240,25 @@ private class RollupCalculatorTests {
   }
 
   @IsTest
-  static void regressionShouldExcludeCurrentItemsOnFirstLastDelete() {
+  static void shouldIncludeStateForFirstLast() {
+    String lookupKey = '0011g00003VDGbF002';
     Rollup__mdt metadata = configureOrderByMetadata(new Rollup__mdt(), 'Name');
-    RollupCalculator calc = getCalculator(0, Rollup.Op.DELETE_FIRST, Opportunity.Amount, Account.AnnualRevenue, metadata, '0011g00003VDGbF002', Account.Id);
+    RollupCalculator calc = getCalculator(0, Rollup.Op.FIRST, Opportunity.Amount, Account.AnnualRevenue, metadata, lookupKey, Account.Id);
+    RollupState outerState = new RollupState();
+    RollupState.SObjectInfo info = (RollupState.SObjectInfo) outerState.getState(lookupKey, metadata, RollupState.SObjectInfo.class);
+    info.setItem(new Opportunity(Name = 'a', Amount = 3));
+    calc.setState(outerState);
 
     calc.performRollup(
       new List<Opportunity>{
-        new Opportunity(Id = '0066g00003VDGbF001', Amount = 2, Name = 'b'),
-        new Opportunity(Id = '0066g00003VDGbF002', Amount = 16, Name = 'a'),
+        new Opportunity(Id = '0066g00003VDGbF001', Amount = 2, Name = 'c'),
+        new Opportunity(Id = '0066g00003VDGbF002', Amount = 16, Name = 'b'),
         new Opportunity(Id = '0066g00003VDGbF003', Amount = 1, Name = 'c')
       },
       new Map<Id, SObject>()
     );
 
-    System.assertEquals(null, calc.getReturnValue(), 'Delete should exclude current values :(');
-  }
-
-  @IsTest
-  static void regressionShouldIncludeCalcItemWhereClauseInQueryFieldsFirst() {
-    Account acc = [SELECT Id FROM Account];
-    Rollup__mdt metadata = configureOrderByMetadata(
-      new Rollup__mdt(CalcItem__c = 'ContactPointAddress', CalcItemWhereClause__c = 'PreferenceRank != 0'),
-      'Name'
-    );
-
-    ContactPointAddress first = new ContactPointAddress(Name = 'a', ParentId = acc.Id, PreferenceRank = 1);
-    insert first;
-
-    ContactPointAddress cpa = new ContactPointAddress(
-      Name = 'b',
-      PreferenceRank = 1,
-      ParentId = acc.Id,
-      Id = RollupTestUtils.createId(ContactPointAddress.SObjectType)
-    );
-
-    RollupCalculator calc = getCalculator(0, Rollup.Op.FIRST, ContactPointAddress.NAME, Account.Description, metadata, acc.Id, ContactPointAddress.ParentId);
-    calc.setEvaluator(new RollupEvaluator.WhereFieldEvaluator(metadata.CalcItemWhereClause__c, ContactPointAddress.SObjectType));
-
-    calc.performRollup(new List<ContactPointAddress>{ cpa }, new Map<Id, SObject>());
-
-    System.assertEquals(first.Name, calc.getReturnValue(), 'First should properly query');
+    System.assertEquals(3, calc.getReturnValue(), 'Should use state properly');
   }
 
   @IsTest
@@ -370,12 +350,10 @@ private class RollupCalculatorTests {
 
   @IsTest
   static void shouldCorrectlyAverageForTasks() {
-    // Task/Event gets ALL ROWS appended to queries
     Account acc = [SELECT Id FROM Account];
-    Task insertedTask = new Task(WhatId = acc.Id, CallDurationInSeconds = 5, Subject = 'Insert', ActivityDate = System.today());
-    insert insertedTask;
 
-    Task passedIn = new Task(WhatId = acc.Id, Subject = 'Passed In', CallDurationInSeconds = 3, Id = RollupTestUtils.createId(Task.SObjectType));
+    Task one = new Task(WhatId = acc.Id, Subject = 'One', CallDurationInSeconds = 3, Id = RollupTestUtils.createId(Task.SObjectType));
+    Task two = new Task(WhatId = acc.Id, CallDurationInSeconds = 5, Subject = 'Two', Id = RollupTestUtils.createId(Task.SObjectType));
 
     RollupCalculator calc = getCalculator(
       0,
@@ -386,7 +364,7 @@ private class RollupCalculatorTests {
       acc.Id,
       Task.AccountId
     );
-    calc.performRollup(new List<Task>{ passedIn }, new Map<Id, SObject>());
+    calc.performRollup(new List<Task>{ one, two }, new Map<Id, SObject>());
 
     System.assertEquals(4, calc.getReturnValue());
   }
@@ -742,23 +720,24 @@ private class RollupCalculatorTests {
   }
 
   @IsTest
-  static void mostWithFullRecalcRespectsIntermediateValues() {
+  static void mostRespectsStateValues() {
     Account acc = [SELECT Id FROM Account];
     Integer priorVal = 50;
-    insert new List<ContactPointAddress>{
-      new ContactPointAddress(Name = 'A', PreferenceRank = priorVal, ParentId = acc.Id),
-      new ContactPointAddress(Name = 'B', PreferenceRank = priorVal, ParentId = acc.Id)
-    };
+    RollupState outerState = new RollupState();
+    Rollup__mdt metaKey = new Rollup__mdt();
+    RollupState.MostInfo info = (RollupState.MostInfo) outerState.getState(acc.Id, metaKey, RollupState.MostInfo.class);
+    info.setValues(2, priorVal);
+
     RollupCalculator calc = getCalculator(
       priorVal,
       Rollup.Op.MOST,
       ContactPointAddress.PreferenceRank,
       Account.AnnualRevenue,
-      new Rollup__mdt(),
+      metaKey,
       acc.Id,
       ContactPointAddress.ParentId
     );
-    calc.setFullRecalc(true);
+    calc.setState(outerState);
 
     ContactPointAddress target = new ContactPointAddress(
       PreferenceRank = 75,
@@ -789,6 +768,31 @@ private class RollupCalculatorTests {
     calc.performRollup(new List<Opportunity>{ opp }, new Map<Id, SObject>());
 
     System.assertEquals(null, calc.getReturnValue());
+  }
+
+  @IsTest
+  static void sumsDistinctWhenFlagged() {
+    Id stubParentId = RollupTestUtils.createId(Schema.Account.SObjectType);
+    Object parentStartingValue = 0;
+    RollupCalculator calc = getCalculator(
+      parentStartingValue,
+      Rollup.Op.SUM,
+      Opportunity.Amount,
+      Account.AnnualRevenue,
+      new Rollup__mdt(IsDistinct__c = true),
+      stubParentId,
+      Opportunity.AccountId
+    );
+
+    calc.performRollup(
+      new List<Opportunity>{
+        new Opportunity(Id = RollupTestUtils.createId(Schema.Opportunity.SObjectType), Amount = 2, AccountId = stubParentId),
+        new Opportunity(Id = RollupTestUtils.createId(Schema.Opportunity.SObjectType), Amount = 2, AccountId = stubParentId)
+      },
+      new Map<Id, SObject>()
+    );
+
+    System.assertEquals(2, calc.getReturnValue());
   }
 
   @IsTest
@@ -850,13 +854,11 @@ private class RollupCalculatorTests {
 
     RollupCurrencyInfo mockUsdInfo = new RollupCurrencyInfo();
     mockUsdInfo.ConversionRate = 1;
-    mockUsdInfo.DecimalPlaces = 2;
     mockUsdInfo.IsoCode = 'USD';
     RollupCurrencyInfo mockEurInfo = new RollupCurrencyInfo();
     mockEurInfo.ConversionRate = .64;
-    mockEurInfo.DecimalPlaces = 2;
     mockEurInfo.IsoCode = 'EUR';
-    RollupCurrencyInfo.mockCurrencyData = new List<RollupCurrencyInfo>{ mockUsdInfo, mockEurInfo };
+    RollupCurrencyInfo.mockBasicCurrencies = new List<RollupCurrencyInfo>{ mockUsdInfo, mockEurInfo };
 
     RollupCalculator calc = getCalculator(
       1.5625,
@@ -881,6 +883,49 @@ private class RollupCalculatorTests {
     System.assertEquals(null, calc.getReturnValue());
   }
 
+  @IsTest
+  static void correctlyAppliesStatefulSums() {
+    Rollup__mdt metaKey = new Rollup__mdt();
+    String accountKey = '0011g00003VDGbF002';
+    Integer value = 1;
+    RollupCalculator calc = getCalculator(null, Rollup.Op.SUM, Opportunity.Amount, Account.AnnualRevenue, metaKey, accountKey, Opportunity.AccountId);
+    RollupState outerState = new RollupState();
+    RollupState.GenericInfo info = (RollupState.GenericInfo) outerState.getState(accountKey, metaKey, RollupState.GenericInfo.class);
+    info.value = value;
+    calc.setState(outerState);
+
+    Opportunity one = new Opportunity(Id = '0066g00003VDGbF001', Amount = 5, AccountId = accountKey);
+    Opportunity two = new Opportunity(Id = '0066g00003VDGbF002', Amount = 5, AccountId = accountKey);
+
+    calc.performRollup(new List<Opportunity>{ one, two }, new Map<Id, SObject>());
+
+    System.assertEquals(one.Amount + two.Amount + value, calc.getReturnValue());
+    System.assertEquals(one.Amount + two.Amount + value, info.value);
+  }
+
+  @IsTest
+  static void doesNotResetParentValueWhenOnlyStatefulSumMatches() {
+    Rollup__mdt metaKey = new Rollup__mdt();
+    String accountKey = '0011g00003VDGbF002';
+    Integer value = 1;
+    RollupCalculator calc = getCalculator(null, Rollup.Op.SUM, Opportunity.Amount, Account.AnnualRevenue, metaKey, accountKey, Opportunity.AccountId);
+    RollupState outerState = new RollupState();
+    RollupState.GenericInfo info = (RollupState.GenericInfo) outerState.getState(accountKey, metaKey, RollupState.GenericInfo.class);
+    info.value = value;
+
+    calc.setState(outerState);
+    calc.setFullRecalc(true);
+    calc.setEvaluator(new RollupEvaluator.WhereFieldEvaluator('Amount = 0', Opportunity.SObjectType));
+
+    Opportunity one = new Opportunity(Id = '0066g00003VDGbF001', Amount = 5, AccountId = accountKey);
+    Opportunity two = new Opportunity(Id = '0066g00003VDGbF002', Amount = 5, AccountId = accountKey);
+
+    calc.performRollup(new List<Opportunity>{ one, two }, new Map<Id, SObject>());
+
+    System.assertEquals(value, calc.getReturnValue());
+    System.assertEquals(value, info.value);
+  }
+
   // CONCAT tests
 
   @IsTest
@@ -902,6 +947,32 @@ private class RollupCalculatorTests {
     calc.performRollup(new List<Opportunity>{ opp }, new Map<Id, SObject>());
 
     System.assertEquals(null, calc.getReturnValue());
+  }
+
+  @IsTest
+  static void shouldDistinctByFlagForConcat() {
+    String distinct = 'distinct';
+    Object parentStartingValue = '';
+    Id stubParentId = RollupTestUtils.createId(Schema.Account.SObjectType);
+    RollupCalculator calc = getCalculator(
+      parentStartingValue,
+      Rollup.Op.CONCAT,
+      Opportunity.Name,
+      Account.Name,
+      new Rollup__mdt(IsDistinct__c = true),
+      stubParentId,
+      Opportunity.AccountId
+    );
+
+    calc.performRollup(
+      new List<Opportunity>{
+        new Opportunity(Id = RollupTestUtils.createId(Schema.Opportunity.SObjectType), Name = distinct, AccountId = stubParentId),
+        new Opportunity(Id = RollupTestUtils.createId(Schema.Opportunity.SObjectType), Name = distinct, AccountId = stubParentId)
+      },
+      new Map<Id, SObject>()
+    );
+
+    System.assertEquals(distinct, calc.getReturnValue());
   }
 
   @IsTest
@@ -942,9 +1013,7 @@ private class RollupCalculatorTests {
     calc.performRollup(new List<Opportunity>{ opp, nonDistinctOpp }, new Map<Id, SObject>());
 
     System.assertEquals(
-      distinct +
-      ', ' +
-      nonDistinctOpp.Name,
+      distinct + ', ' + nonDistinctOpp.Name,
       (String) calc.getReturnValue(),
       'Value containing original distinct value should also be concatenated'
     );
@@ -956,9 +1025,7 @@ private class RollupCalculatorTests {
     String firstVal = '2011';
     String secondVal = '2021';
     RollupCalculator calc = getCalculator(
-      firstVal +
-      ', ' +
-      secondVal,
+      firstVal + ', ' + secondVal,
       Rollup.Op.UPDATE_CONCAT_DISTINCT,
       Opportunity.Name,
       Account.Name,
@@ -991,6 +1058,25 @@ private class RollupCalculatorTests {
     calc.performRollup(new List<Opportunity>{ opp, nonDistinctOpp }, new Map<Id, SObject>());
 
     System.assertEquals(distinct + ' -- ' + nonDistinctOpp.Name, calc.getReturnValue(), 'distinct values should be concatenated with custom delimiter!');
+  }
+
+  @IsTest
+  static void shouldProperlyAccountForPreExistingValueWitNewLineDelimiter() {
+    String distinct = 'distinct';
+    RollupCalculator calc = getCalculator(
+      distinct,
+      Rollup.Op.CONCAT_DISTINCT,
+      Opportunity.Name,
+      Account.Name,
+      new Rollup__mdt(ConcatDelimiter__c = '\\n'),
+      '0011g00003VDGbF002',
+      Opportunity.AccountId
+    );
+    Opportunity opp = new Opportunity(Id = '0066g00003VDGbF001', Name = distinct, AccountId = '0016g00003VDGbF001');
+    Opportunity nonDistinctOpp = new Opportunity(Id = '0066g00003VDGbF001', Name = 'non' + distinct, AccountId = '0016g00003VDGbF001');
+    calc.performRollup(new List<Opportunity>{ opp, nonDistinctOpp }, new Map<Id, SObject>());
+
+    System.assertEquals(distinct + '\n' + nonDistinctOpp.Name, String.valueOf(calc.getReturnValue()).trim());
   }
 
   @IsTest
@@ -1036,9 +1122,7 @@ private class RollupCalculatorTests {
     String extantString = 'GISS';
     insert new Opportunity(Name = extantString, CloseDate = System.today(), StageName = 'A', AccountId = acc.Id);
     RollupCalculator calc = getCalculator(
-      toRemove +
-      ', ' +
-      extantString,
+      toRemove + ', ' + extantString,
       Rollup.Op.UPDATE_CONCAT_DISTINCT,
       Opportunity.Name,
       Account.Name,
@@ -1123,6 +1207,29 @@ private class RollupCalculatorTests {
     );
 
     System.assertEquals('And;Hello;SSK;World, I know', (String) calc.getReturnValue(), 'Multi-select should use ; to concat');
+  }
+
+  @IsTest
+  static void shouldRemoveValuesOnMspProperly() {
+    RollupCalculator calc = getCalculator(
+      'Hello;World',
+      Rollup.Op.UPDATE_CONCAT,
+      Opportunity.StageName,
+      QuickText.Channel,
+      new Rollup__mdt(),
+      RollupTestUtils.createId(QuickText.SObjectType),
+      Opportunity.Name
+    );
+
+    String firstStubId = RollupTestUtils.createId(Opportunity.SObjectType);
+    String secondStubId = RollupTestUtils.createId(Opportunity.SObjectType);
+
+    calc.performRollup(
+      new List<Opportunity>{ new Opportunity(StageName = 'Hello', Id = firstStubId), new Opportunity(Id = secondStubId) },
+      new Map<Id, SObject>{ firstStubId => new Opportunity(StageName = 'Hello'), secondStubId => new Opportunity(StageName = 'World') }
+    );
+
+    System.assertEquals('Hello', calc.getReturnValue(), 'Multi-select should properly remove values on update');
   }
 
   @IsTest
@@ -1273,6 +1380,50 @@ private class RollupCalculatorTests {
     );
 
     Assert.isNotNull(calc);
+  }
+
+  @IsTest
+  static void supportsAlphabeticalSortingFromPicklistsAscending() {
+    RollupCalculator calc = getCalculator(
+      '',
+      Rollup.Op.CONCAT_DISTINCT,
+      Account.Industry,
+      Schema.User.Department,
+      Rollup.appendOrderByMetadata(
+        new Rollup__mdt(),
+        new List<RollupOrderBy__mdt>{
+          new RollupOrderBy__mdt(FieldName__c = 'Industry', SortOrder__c = 'Ascending', Ranking__c = 0, ShouldOverridePicklistOrdering__c = true)
+        }
+      ),
+      RollupTestUtils.createId(User.SObjectType),
+      User.Id
+    );
+
+    calc.performRollup(new List<Account>{ new Account(Industry = 'b'), new Account(Industry = 'a') }, new Map<Id, SObject>());
+
+    System.assertEquals('a, b', calc.getReturnValue());
+  }
+
+  @IsTest
+  static void supportsAlphabeticalSortingFromPicklistsDescending() {
+    RollupCalculator calc = getCalculator(
+      '',
+      Rollup.Op.CONCAT_DISTINCT,
+      Account.Industry,
+      Schema.User.Department,
+      Rollup.appendOrderByMetadata(
+        new Rollup__mdt(),
+        new List<RollupOrderBy__mdt>{
+          new RollupOrderBy__mdt(FieldName__c = 'Industry', SortOrder__c = 'Descending', Ranking__c = 0, ShouldOverridePicklistOrdering__c = true)
+        }
+      ),
+      RollupTestUtils.createId(User.SObjectType),
+      User.Id
+    );
+
+    calc.performRollup(new List<Account>{ new Account(Industry = 'b'), new Account(Industry = 'a') }, new Map<Id, SObject>());
+
+    System.assertEquals('b, a', calc.getReturnValue());
   }
 
   @IsTest
@@ -1957,13 +2108,13 @@ private class RollupCalculatorTests {
     calc.handleCountDistinct(null);
     calc.handleUpdateCountDistinct(null);
     calc.handleSumOrCount(null);
-    calc.handleUpdateSumOrCount(null, null);
+    calc.handleUpdateSumOrCount(null);
     calc.handleDeleteSumOrCount(null);
     calc.handleMin(null);
     calc.handleMax(null);
-    calc.handleUpdateMinOrMax(null, null);
+    calc.handleUpdateMinOrMax(null);
     calc.handleConcat(null);
-    calc.handleUpdateConcat(null, null);
+    calc.handleUpdateConcat(null);
     calc.handleDeleteConcat(null);
 
     System.assert(true, 'Should make it here');
@@ -2131,12 +2282,61 @@ private class RollupCalculatorTests {
     System.assertEquals('<table>' + tableHeader + firstTableBodyRow + secondTableBodyRow + '</table>', calc.getReturnValue());
   }
 
-  private class RollupCalcEmptyMock extends RollupCalculator {
-    public RollupCalcEmptyMock() {
-      super(Rollup.Op.LAST, null, null, new Rollup__mdt(), null);
-    }
+  @IsTest
+  static void averageFactorsInBatchState() {
+    Rollup__mdt meta = new Rollup__mdt();
+    String lookupKey = RollupTestUtils.createId(Account.SObjectType);
+    RollupState outerState = new RollupState();
+    RollupState.AverageInfo state = (RollupState.AverageInfo) outerState.getState(lookupKey, meta, RollupState.AverageInfo.class);
+    state.denominator = 15;
+    state.numerator = 75;
+    RollupCalculator calc = getCalculator(
+      state.numerator / state.denominator,
+      Rollup.Op.AVERAGE,
+      Opportunity.Amount,
+      Account.Description,
+      meta,
+      lookupKey,
+      Account.Id
+    );
+    calc.setState(outerState);
+
+    calc.performRollup(
+      new List<SObject>{
+        new Opportunity(Amount = 15),
+        new Opportunity(Amount = 15),
+        new Opportunity(Amount = 15),
+        new Opportunity(Amount = 15),
+        new Opportunity(Amount = 15)
+      },
+      new Map<Id, SObject>()
+    );
+
+    Assert.areEqual(7.5, calc.getReturnValue());
   }
 
+  @IsTest
+  static void valuesCalculatorUpdatesOperationCorrectly() {
+    RollupCalculator calc = getCalculator(
+      0,
+      Rollup.Op.SUM,
+      Opportunity.Amount,
+      Account.AnnualRevenue,
+      new Rollup__mdt(),
+      '0011g00003VDGbF002',
+      Opportunity.AccountId
+    );
+
+    RollupCalculator.ValueRollupCalculator outerCalc = new RollupCalculator.ValueRollupCalculator(calc, new List<Object>{ 2, 3 });
+    outerCalc.setOperation(Rollup.Op.MAX);
+
+    Assert.areEqual(3, outerCalc.getReturnValue());
+  }
+
+  private class RollupCalcEmptyMock extends RollupCalculator {
+  }
+
+  @SuppressWarnings('PMD.ExcessiveParameterList')
   private static RollupCalculator getCalculator(
     Object priorVal,
     Rollup.Op operation,

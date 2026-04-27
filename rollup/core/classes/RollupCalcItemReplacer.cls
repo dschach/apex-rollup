@@ -5,6 +5,7 @@
  * - a polymorphic child object where clause field
  * - parent-level fields
  */
+@SuppressWarnings('PMD.CognitiveComplexity,PMD.ExcessiveParameterList')
 public without sharing class RollupCalcItemReplacer {
   private final RollupControl__mdt control;
   private final Set<Rollup__mdt> processedMetadata = new Set<Rollup__mdt>();
@@ -27,7 +28,7 @@ public without sharing class RollupCalcItemReplacer {
     if (fieldToken?.getDescribe().isCalculated() == false && fieldToken?.getDescribe().isUpdateable() == true) {
       target.put(fieldToken, value);
     } else {
-      target = serializeReplace(target, fieldToken.getDescribe().getName(), value);
+      target = serializeReplace(target, fieldToken.toString(), value);
     }
     return target;
   }
@@ -73,12 +74,10 @@ public without sharing class RollupCalcItemReplacer {
     if (calcItems?.isEmpty() != false || metadata?.isEmpty() != false) {
       return localNeedsReplacement;
     }
-    if (this.repo == null) {
-      this.repo = new RollupRepository(RollupMetaPicklists.getAccessLevel(metadata[0]));
-    }
+    this.repo = this.repo ?? new RollupRepository(RollupMetaPicklists.getAccessLevel(metadata[0]));
     SObjectType calcType = calcItems[0].getSObjectType();
     for (Rollup__mdt meta : metadata) {
-      if (meta.CalcItem__c != calcType.getDescribe().getName()) {
+      if (meta.CalcItem__c != calcType.toString()) {
         continue;
       }
 
@@ -126,8 +125,11 @@ public without sharing class RollupCalcItemReplacer {
         this.fillField(this.parentQueryFields, '' + calcItem.getSObjectType(), fieldName);
       }
     } else {
-      // it'd be great to use calcItem.isSet(fieldName) here, but that returns false for null values
+      if (fieldName.startsWithIgnoreCase('not(')) {
+        fieldName = fieldName.substring(4, fieldName.length());
+      }
       try {
+        // it'd be great to use calcItem.isSet(fieldName) here, but that returns false for null values
         calcItem.get(fieldName);
       } catch (Exception ex) {
         this.fillField(this.baseQueryFields, '' + calcItem.getSObjectType(), fieldName);
@@ -148,20 +150,21 @@ public without sharing class RollupCalcItemReplacer {
     if (calcItems.isEmpty()) {
       return calcItems;
     }
-    Map<Id, SObject> idToCalcItem = RollupFieldInitializer.Current.createSafeMap(calcItems);
     Set<String> baseFields = this.baseQueryFields.get('' + calcItems[0].getSObjectType());
-    if (baseFields?.isEmpty() == false) {
-      SObject firstItem = calcItems[0];
-      String queryString = RollupQueryBuilder.Current.getQuery(firstItem.getSObjectType(), new List<String>(baseFields), 'Id', '=');
-      List<SObject> calcItemsWithReplacement = this.repo.setQuery(queryString).setArg(calcItems).get();
-      Map<String, Schema.SObjectField> fieldNameToDescribe = firstItem.getSObjectType().getDescribe().fields.getMap();
-      for (SObject calcItemWithReplacement : calcItemsWithReplacement) {
-        if (idToCalcItem.containsKey(calcItemWithReplacement.Id)) {
-          SObject calcItem = idToCalcItem.get(calcItemWithReplacement.Id);
-          for (String baseField : baseFields) {
-            Schema.SObjectfield baseFieldToken = fieldNameToDescribe.get(baseField);
-            idToCalcItem.put(calcItem.Id, replaceField(calcItem, baseFieldToken, calcItemWithReplacement.get(baseField)));
-          }
+    if (baseFields?.isEmpty() != false) {
+      return calcItems;
+    }
+    Map<Id, SObject> idToCalcItem = RollupFieldInitializer.Current.createSafeMap(calcItems);
+    SObject firstItem = calcItems[0];
+    String queryString = RollupQueryBuilder.Current.getQuery(firstItem.getSObjectType(), new List<String>(baseFields), 'Id', '=');
+    List<SObject> calcItemsWithReplacement = this.repo.setQuery(queryString).setArg(calcItems).get();
+    Map<String, Schema.SObjectField> fieldNameToDescribe = firstItem.getSObjectType().getDescribe().fields.getMap();
+    for (SObject calcItemWithReplacement : calcItemsWithReplacement) {
+      if (idToCalcItem.containsKey(calcItemWithReplacement.Id)) {
+        SObject calcItem = idToCalcItem.get(calcItemWithReplacement.Id);
+        for (String baseField : baseFields) {
+          Schema.SObjectfield baseFieldToken = fieldNameToDescribe.get(baseField);
+          idToCalcItem.put(calcItem.Id, replaceField(calcItem, baseFieldToken, calcItemWithReplacement.get(baseField)));
         }
       }
     }
@@ -173,6 +176,9 @@ public without sharing class RollupCalcItemReplacer {
       Map<String, Schema.SObjectField> fieldMap = calcItems[0].getSObjectType().getDescribe(SObjectDescribeOptions.DEFERRED).fields.getMap();
       for (Rollup__mdt meta : this.metaToEval.keySet()) {
         calcItems = this.replaceCalcItemsWithPolymorphicWhereClauses(calcItems, meta, fieldMap);
+        if (calcItems.isEmpty()) {
+          break;
+        }
       }
     }
     return calcItems;
@@ -182,10 +188,7 @@ public without sharing class RollupCalcItemReplacer {
     // first we check to see if there is a child object where clause, and that it contains any of the common polymorphic fields
     SObject firstItem = calcItems[0];
     SObjectType sObjectType = firstItem.getSObjectType();
-    Set<String> optionalWhereClauses = this.keyToOptionalWhereClauses.get(OWNER + sObjectType);
-    if (optionalWhereClauses == null) {
-      optionalWhereClauses = new Set<String>();
-    }
+    Set<String> optionalWhereClauses = this.keyToOptionalWhereClauses.get(OWNER + sObjectType) ?? new Set<String>();
     Boolean hasOwnerClause = optionalWhereClauses.isEmpty() == false;
     Boolean hasTypeClause = this.keyToOptionalWhereClauses.containsKey(TYPE_FIELD + sObjectType);
     if (hasTypeClause) {
@@ -238,7 +241,7 @@ public without sharing class RollupCalcItemReplacer {
       new List<String>(additionalQueryFields),
       'Id',
       '=',
-      String.join(optionalWhereClauses, ' AND ')
+      String.join(optionalWhereClauses, ' OR ')
     );
 
     calcItems = this.repo.setQuery(queryString).setArg(calcItems).get();
@@ -247,28 +250,39 @@ public without sharing class RollupCalcItemReplacer {
 
   private void processWhereClauseForDownstreamEvals(Schema.SObjectType sObjectType, Rollup__mdt metadata, RollupEvaluator.WhereFieldEvaluator whereEval) {
     for (String whereClause : whereEval.getWhereClauses()) {
-      Boolean hasTypeField = whereClause.contains(TYPE_FIELD);
+      // the period needs to be escaped when splitting, otherwise this can match namespaced fields accidentally
+      Boolean hasTypeField = false;
+      List<String> typeParts = whereClause.split('\\' + TYPE_FIELD + '(?!__r)');
+      if (typeParts.size() > 1) {
+        String typeField = typeParts.remove(0);
+        typeField = typeField.endsWith('__r') ? typeField.removeEnd('__r') + '__c' : typeField + 'Id';
+        Schema.SObjectField fieldToken = sObjectType.getDescribe(SObjectDescribeOptions.DEFERRED).fields.getMap().get(typeField);
+        if (fieldToken?.getDescribe().isNamePointing() == true) {
+          hasTypeField = true;
+        }
+      }
       Boolean hasOwnerField = whereClause.contains(OWNER);
-      if (hasTypeField || hasOwnerField) {
-        // "consume" the metadata where clause for downstream evaluators
-        List<String> splitWheres = whereClause.split(' ');
-        if (splitWheres.size() > 0) {
-          Set<String> additionalQueryFields = this.typeToAdditionalQueryFields.get(sObjectType);
-          if (additionalQueryFields == null) {
-            additionalQueryFields = new Set<String>();
-            this.typeToAdditionalQueryFields.put(sObjectType, additionalQueryFields);
-          }
-          additionalQueryFields.add(splitWheres[0]);
+      if (hasTypeField == false && hasOwnerField == false) {
+        continue;
+      }
+      // "consume" the metadata where clause for downstream evaluators
+      List<String> splitWheres = whereClause.split(' ');
+      if (splitWheres.size() > 0) {
+        Set<String> additionalQueryFields = this.typeToAdditionalQueryFields.get(sObjectType);
+        if (additionalQueryFields == null) {
+          additionalQueryFields = new Set<String>();
+          this.typeToAdditionalQueryFields.put(sObjectType, additionalQueryFields);
         }
-        metadata.CalcItemWhereClause__c = metadata.CalcItemWhereClause__c.replace(whereClause, '');
-        if (hasTypeField) {
-          String key = TYPE_FIELD + sObjectType;
-          this.fillField(this.keyToOptionalWhereClauses, key, whereClause);
-        }
-        if (hasOwnerField) {
-          String key = OWNER + sObjectType;
-          this.fillField(this.keyToOptionalWhereClauses, key, whereClause);
-        }
+        additionalQueryFields.add(splitWheres[0]);
+      }
+      metadata.CalcItemWhereClause__c = metadata.CalcItemWhereClause__c.replace(whereClause, '');
+      if (hasTypeField) {
+        String key = TYPE_FIELD + sObjectType;
+        this.fillField(this.keyToOptionalWhereClauses, key, whereClause);
+      }
+      if (hasOwnerField) {
+        String key = OWNER + sObjectType;
+        this.fillField(this.keyToOptionalWhereClauses, key, whereClause);
       }
     }
   }
@@ -338,41 +352,41 @@ public without sharing class RollupCalcItemReplacer {
     Map<String, SObjectField> fieldNameToFieldToken = calcItems[0].getSObjectType().getDescribe().fields.getMap();
     for (Integer index = 0; index < calcItems.size(); index++) {
       SObject calcItem = calcItems[index];
-      SObject calcItemWIthUpdatedParentField = idToCalcItemsWithParentFields.get(calcItem.Id);
-      if (calcItemWIthUpdatedParentField == null) {
-        continue;
-      }
-      for (String fieldName : calcItemWIthUpdatedParentField.getPopulatedFieldsAsMap().keySet()) {
-        if (fieldNameToFieldToken.containsKey(fieldName)) {
-          DescribeFieldResult fieldToken = fieldNameToFieldToken.get(fieldName).getDescribe();
-          Boolean isAcceptableField = fieldToken.getReferenceTo().isEmpty() == false && fieldToken.getName() != 'Id';
-          if (isAcceptableField && fieldToken.isNamePointing() == false) {
-            try {
-              SObject parent = calcItem.getSObject(fieldToken.getRelationshipName());
-              if (parent == null) {
-                calcItem.putSObject(fieldToken.getRelationshipName(), calcItemWIthUpdatedParentField.getSObject(fieldToken.getRelationshipName()));
-              } else {
-                parent.put(fieldName, calcItemWIthUpdatedParentField.getPopulatedFieldsAsMap().get(fieldName));
-              }
-            } catch (SObjectException ex) {
-              // avoids "System.SObjectException: Relationship { relationship name } is not editable"
-              if (calcItemWIthUpdatedParentField.getPopulatedFieldsAsMap().containsKey(fieldToken.getRelationshipName())) {
-                String relationshipName = fieldToken.getRelationshipName();
-                calcItems.set(index, serializeReplace(calcItem, relationshipName, calcItemWIthUpdatedParentField.getSObject(relationshipName)));
-              }
+      SObject calcItemWithUpdatedParentField = idToCalcItemsWithParentFields.get(calcItem.Id);
+      Map<String, Object> updatedParentFields = calcItemWithUpdatedParentField?.getPopulatedFieldsAsMap() ?? new Map<String, Object>();
+      for (String fieldName : updatedParentFields.keySet()) {
+        Schema.DescribeFieldResult fieldToken = fieldNameToFieldToken.get(fieldName)?.getDescribe();
+        Boolean isSkippableField = fieldToken?.getReferenceTo().isEmpty() != false || fieldToken?.getName() == 'Id';
+        if (isSkippableField) {
+          continue;
+        }
+
+        if (fieldToken.isNamePointing() == false) {
+          try {
+            SObject parent = calcItem.getSObject(fieldToken.getRelationshipName());
+            if (parent == null) {
+              calcItem.putSObject(fieldToken.getRelationshipName(), calcItemWithUpdatedParentField.getSObject(fieldToken.getRelationshipName()));
+            } else {
+              parent.put(fieldName, updatedParentFields.get(fieldName));
             }
-          } else if (isAcceptableField) {
-            // polymorphic parent fields that are returned from SOQL can get retrieved via .getSObject,
-            // but can't be appended via .putSObject without reinitializing the parent object to its actual type
-            // this is because they are returned with type "Name", and avoids the dreaded:
-            // "System.SObjectException: Illegal assignment from Name to { the calcItem type }"
-            SObject parentFieldObject = calcItemWIthUpdatedParentField.getSObject(fieldToken.getRelationshipName());
-            SObject replacementObject = parentFieldObject.Id.getSObjectType().newSObject();
-            for (String populatedFieldName : parentFieldObject.getPopulatedFieldsAsMap().keySet()) {
-              replacementObject.put(populatedFieldName, parentFieldObject.get(populatedFieldName));
+          } catch (SObjectException ex) {
+            // avoids "System.SObjectException: Relationship { relationship name } is not editable"
+            if (updatedParentFields.containsKey(fieldToken.getRelationshipName())) {
+              String relationshipName = fieldToken.getRelationshipName();
+              calcItems.set(index, serializeReplace(calcItem, relationshipName, calcItemWithUpdatedParentField.getSObject(relationshipName)));
             }
-            calcItem.putSObject(fieldToken.getRelationshipName(), replacementObject);
           }
+        } else {
+          // polymorphic parent fields that are returned from SOQL can get retrieved via .getSObject,
+          // but can't be appended via .putSObject without reinitializing the parent object to its actual type
+          // this is because they are returned with type "Name", and avoids the dreaded:
+          // "System.SObjectException: Illegal assignment from Name to { the calcItem type }"
+          SObject parentFieldObject = calcItemWithUpdatedParentField.getSObject(fieldToken.getRelationshipName());
+          SObject replacementObject = parentFieldObject.Id.getSObjectType().newSObject();
+          for (String populatedFieldName : parentFieldObject.getPopulatedFieldsAsMap().keySet()) {
+            replacementObject.put(populatedFieldName, parentFieldObject.get(populatedFieldName));
+          }
+          calcItem.putSObject(fieldToken.getRelationshipName(), replacementObject);
         }
       }
     }

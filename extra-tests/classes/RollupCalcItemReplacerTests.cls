@@ -162,4 +162,107 @@ private class RollupCalcItemReplacerTests {
 
     System.assertNotEquals(null, updatedContact);
   }
+
+  @IsTest
+  static void worksWithParantheticalNotClauses() {
+    Account acc = [SELECT Id FROM Account];
+
+    RollupCalcItemReplacer replacer = new RollupCalcItemReplacer(
+      new RollupControl__mdt(IsRollupLoggingEnabled__c = true, ReplaceCalcItemsAsyncWhenOverCount__c = 2)
+    );
+    acc = (Account) replacer.replace(
+      new List<Account>{ acc, acc },
+      new List<Rollup__mdt>{ new Rollup__mdt(CalcItemWhereClause__c = 'NOT(AnnualRevenue != 0 AND Name != null)', CalcItem__c = 'Account') }
+    )[0];
+
+    System.assertEquals(ACC_ANNUAL_REVENUE, acc.AnnualRevenue);
+  }
+
+  @IsTest
+  static void exclusiveWhereClauseWithMultipleMetadataRecordsDoesNotBlowUpList() {
+    Account acc = [SELECT Id FROM Account];
+    RollupCalcItemReplacer replacer = new RollupCalcItemReplacer(
+      new RollupControl__mdt(IsRollupLoggingEnabled__c = true, ReplaceCalcItemsAsyncWhenOverCount__c = 3)
+    );
+
+    List<SObject> records = replacer.replace(
+      new List<Account>{ acc, acc },
+      new List<Rollup__mdt>{
+        new Rollup__mdt(CalcItemWhereClause__c = 'Id != \'' + acc.Id + '\' AND Owner.Name = null', CalcItem__c = 'Account'),
+        new Rollup__mdt(CalcItemWhereClause__c = 'AnnualRevenue = null', CalcItem__c = 'Account')
+      }
+    );
+
+    Assert.areEqual(0, records.size());
+  }
+
+  @IsTest
+  static void doesNotUseAndForMultipleParentWhereClauses() {
+    Account acc = [SELECT Id FROM Account];
+    RollupCalcItemReplacer replacer = new RollupCalcItemReplacer(
+      new RollupControl__mdt(IsRollupLoggingEnabled__c = true, ReplaceCalcItemsAsyncWhenOverCount__c = 3)
+    );
+
+    List<SObject> records = replacer.replace(
+      new List<Account>{ acc, acc },
+      new List<Rollup__mdt>{
+        new Rollup__mdt(CalcItemWhereClause__c = 'Id != \'' + acc.Id + '\' AND Owner.Name = null', CalcItem__c = 'Account'),
+        new Rollup__mdt(CalcItemWhereClause__c = 'Owner.Name != null AND Type != null', CalcItem__c = 'Account')
+      }
+    );
+
+    Assert.areEqual(1, records.size());
+    Assert.areEqual(acc.Id, records[0].Id);
+  }
+
+  @IsTest
+  static void doesNotReplaceForCustomTypeFields() {
+    List<Account> accounts = [SELECT Id FROM Account];
+    Integer currentQueryCount = Limits.getQueries();
+    RollupCalcItemReplacer replacer = new RollupCalcItemReplacer(
+      new RollupControl__mdt(IsRollupLoggingEnabled__c = true, ReplaceCalcItemsAsyncWhenOverCount__c = 3)
+    );
+    List<Rollup__mdt> metas = new List<Rollup__mdt>{ new Rollup__mdt(CalcItemWhereClause__c = 'Parent.Type__r = \'hello\'', CalcItem__c = 'Account') };
+
+    List<SObject> records = replacer.replace(accounts, metas);
+
+    Assert.areEqual(1, records.size());
+    Assert.isTrue(replacer.hasProcessedMetadata(metas, accounts));
+    Assert.areEqual(currentQueryCount, Limits.getQueries());
+  }
+
+  @IsTest
+  static void doesNotReplaceForCustomTypeFieldsWithPrecedingCharacters() {
+    List<Account> accounts = [SELECT Id, AType__c FROM Account];
+    Integer currentQueryCount = Limits.getQueries();
+    RollupCalcItemReplacer replacer = new RollupCalcItemReplacer(
+      new RollupControl__mdt(IsRollupLoggingEnabled__c = true, ReplaceCalcItemsAsyncWhenOverCount__c = 3)
+    );
+    List<Rollup__mdt> metas = new List<Rollup__mdt>{ new Rollup__mdt(CalcItemWhereClause__c = 'AType__c = \'hello\'', CalcItem__c = 'Account') };
+
+    List<SObject> records = replacer.replace(accounts, metas);
+
+    Assert.areEqual(1, records.size());
+    Assert.isTrue(replacer.hasProcessedMetadata(metas, accounts));
+    Assert.areEqual(currentQueryCount, Limits.getQueries());
+  }
+
+  @IsTest
+  static void shouldNotFailWhenParentClauseHasNonPolymorphicType() {
+    Opportunity opp = new Opportunity(Type = 'hi', Name = 'someName', CloseDate = System.today(), StageName = 'Closed Won');
+    insert opp;
+    Contact con = new Contact(LastName = 'someName');
+    insert con;
+    OpportunityContactRole oppConRole = new OpportunityContactRole(OpportunityId = opp.Id, ContactId = con.Id);
+    insert oppConRole;
+
+    String whereClause = 'Opportunity.Type != \'someName\' AND Opportunity.Name = \'someName\'';
+    RollupCalcItemReplacer replacer = new RollupCalcItemReplacer(
+      new RollupControl__mdt(IsRollupLoggingEnabled__c = true, ReplaceCalcItemsAsyncWhenOverCount__c = 3)
+    );
+    List<Rollup__mdt> metas = new List<Rollup__mdt>{ new Rollup__mdt(CalcItemWhereClause__c = whereClause, CalcItem__c = 'OpportunityContactRole') };
+    List<SObject> records = replacer.replace(new List<OpportunityContactRole>{ new OpportunityContactRole(Id = oppConRole.Id) }, metas);
+    Assert.areEqual(opp.Type, ((OpportunityContactRole) records[0]).Opportunity.Type);
+    Assert.areEqual(whereClause, metas[0].CalcItemWhereClause__c);
+  }
 }

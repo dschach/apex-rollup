@@ -1,19 +1,37 @@
+@SuppressWarnings('PMD.CognitiveComplexity')
 public without sharing class RollupParentResetProcessor extends RollupFullBatchRecalculator {
   @TestVisible
   private static Integer maxQueryRows = Limits.getLimitQueryRows() / 2;
   private static Boolean isValidRun = false;
+  private static Boolean isRecursiveRun = false;
 
-  private Integer countOfItems;
+  private Integer countOfItems {
+    get {
+      this.countOfItems = this.countOfItems ?? this.preStart().getCount();
+      return this.countOfItems;
+    }
+    set;
+  }
 
   private without sharing class QueueableResetProcessor extends RollupAsyncProcessor.QueueableProcessor {
     private final RollupParentResetProcessor processor;
     private QueueableResetProcessor(RollupParentResetProcessor processor) {
       super(processor.invokePoint);
       this.processor = processor;
+      this.finalizer = processor.finalizer;
+    }
+
+    public override String getTypeName() {
+      return QueueableResetProcessor.class.getName();
     }
 
     protected override void performWork() {
-      if (this.processor.getNumberOfItems() > maxQueryRows) {
+      for (RollupAsyncProcessor roll : this.processor.rollups) {
+        if (roll instanceof RollupFullRecalcProcessor) {
+          this.finalizer.addCaboose((RollupFullRecalcProcessor) roll);
+        }
+      }
+      if (this.processor.countOfItems > maxQueryRows) {
         Database.executeBatch(this.processor, this.processor.rollupControl.BatchChunkSize__c.intValue());
       } else {
         this.processor.runSync();
@@ -21,6 +39,7 @@ public without sharing class RollupParentResetProcessor extends RollupFullBatchR
     }
   }
 
+  @SuppressWarnings('PMD.ExcessiveParameterList')
   public RollupParentResetProcessor(
     List<Rollup__mdt> matchingMeta,
     SObjectType calcItemType,
@@ -40,48 +59,57 @@ public without sharing class RollupParentResetProcessor extends RollupFullBatchR
     getRefinedQueryString(this.queryString, this.rollupMetas, this.invokePoint);
     this.objIds.addAll(this.recordIds);
     String processId = this.getNoProcessId();
-    if (isValidRun == false || this.rollupControl.ShouldSkipResettingParentFields__c == true) {
-      this.logger.log('Parent reset processor no-op', LoggingLevel.INFO);
-      return processId;
+    if (isValidRun == false || this.rollupControl.ShouldSkipResettingParentFields__c == true || this.countOfItems <= 0) {
+      this.logger.log('Parent reset processor no-op', System.LoggingLevel.INFO);
+      String possibleProcessId = this.arrangeCabooses();
+      return possibleProcessId ?? processId;
     }
-    Boolean isOverLimit = this.getNumberOfItems() > maxQueryRows;
-    if (isOverLimit && this.isBatch() == false) {
-      // avoids: System.AsyncException: Database.executeBatch cannot be called from a batch start, batch execute, or future method
-      processId = super.startAsyncWork();
-    } else if (isOverLimit && Limits.getLimitQueueableJobs() > Limits.getQueueableJobs()) {
+    Boolean isOverLimit = this.countOfItems > maxQueryRows;
+    Integer previouslyQueuedJobs = Limits.getQueueableJobs();
+    if (isOverLimit && System.isQueueable() && previouslyQueuedJobs == 1 && this.finalizer != null) {
+      this.finalizer.addCaboose(new QueueableResetProcessor(this));
+    } else if (isOverLimit && Limits.getLimitQueueableJobs() > previouslyQueuedJobs) {
       // avoids System.LimitException: Too many queueable jobs added to the queue: { output of Limits.getQueueableJobs() }
       // down the rabbit hole we go again
       processId = this.startAsyncWork();
-    } else if (this.getNumberOfItems() > 0) {
+    } else if (this.countOfItems > 0) {
+      isRecursiveRun = true;
+      for (RollupAsyncProcessor proc : this.rollups) {
+        processId = proc.runCalc();
+      }
+      isRecursiveRun = false;
       this.runSync();
     }
 
     return processId;
   }
 
-  public override void execute(Database.BatchableContext bc, List<SObject> parentItems) {
+  protected override void innerBatchExecute(List<SObject> parentItems) {
     if (parentItems.isEmpty()) {
       return;
     }
-    this.logger.log('resetting parent fields for: ' + parentItems.size() + ' items', LoggingLevel.INFO);
     Map<String, Schema.SObjectField> parentFields = parentItems.get(0).getSObjectType().getDescribe().fields.getMap();
-    for (SObject parentItem : parentItems) {
-      for (Rollup__mdt rollupMeta : this.rollupMetas) {
-        if (
-          rollupMeta.LookupObject__c == this.calcItemType.getDescribe().getName() &&
-          this.parentRollupFieldHasBeenReset(
-            rollupMeta.LookupFieldOnLookupObject__c,
-            parentItem,
-            rollupMeta.LookupObject__c,
-            rollupMeta.RollupFieldOnLookupObject__c
-          ) == false &&
-          parentFields.containsKey(rollupMeta.RollupFieldOnLookupObject__c)
-        ) {
-          parentItem.put(rollupMeta.RollupFieldOnLookupObject__c, this.getDefaultValue(rollupMeta));
-        }
+    for (Rollup__mdt rollupMeta : this.rollupMetas) {
+      Schema.SObjectField parentFieldToken = parentFields.get(rollupMeta.RollupFieldOnLookupObject__c);
+      if (
+        rollupMeta.LookupObject__c != this.calcItemType.toString() ||
+        this.parentRollupFieldHasBeenReset(rollupMeta.LookupObject__c, rollupMeta.RollupFieldOnLookupObject__c) ||
+        parentFieldToken == null
+      ) {
+        continue;
+      }
+      Object defaultVal = this.getDefaultValue(rollupMeta);
+      this.logger.log(
+        'resetting parent fields to: ' + defaultVal + ' for field: ' + parentFieldToken + ' for ' + parentItems.size() + ' items',
+        System.LoggingLevel.DEBUG
+      );
+      for (SObject parentItem : parentItems) {
+        this.getDML().updateField(parentFieldToken, parentItem, defaultVal);
       }
     }
-    this.getDML().doUpdate(parentItems);
+    if (isRecursiveRun == false) {
+      this.getDML().updateRecords();
+    }
   }
 
   protected override String getTypeName() {
@@ -92,11 +120,11 @@ public without sharing class RollupParentResetProcessor extends RollupFullBatchR
     return this.rollupControl.ShouldSkipResettingParentFields__c ? this.getNoProcessId() : System.enqueueJob(new QueueableResetProcessor(this));
   }
 
-  private Integer getNumberOfItems() {
-    if (this.countOfItems == null) {
-      this.countOfItems = this.preStart().getCount();
-    }
-    return this.countOfItems;
+  protected override Map<String, String> customizeToStringEntries(Map<String, String> props) {
+    props = super.customizeToStringEntries(props);
+    props.remove('Rollup Control');
+    props.remove('Rollup Metadata');
+    return props;
   }
 
   private void runSync() {
@@ -112,17 +140,17 @@ public without sharing class RollupParentResetProcessor extends RollupFullBatchR
     if (matchingMeta.isEmpty() == false) {
       Map<String, SObjectField> fieldTokens = RollupFieldInitializer.Current.getDescribeFromName(matchingMeta[0].LookupObject__c).fields.getMap();
       for (Rollup__mdt meta : matchingMeta) {
-        SObjectField token = RollupFieldInitializer.Current.getSObjectFieldByName(fieldTokens, meta.RollupFieldOnLookupObject__c);
-        if (token?.getDescribe().isFilterable() == true) {
-          isValidRun = isValidRun || true;
-          Object searchObject = getDefaultValue(meta, invokePoint);
-          String searchValue = String.valueOf(searchObject);
-          if (searchObject instanceof String) {
-            searchValue = '\'' + searchValue + '\'';
-          }
-
-          additionalFilters += meta.RollupFieldOnLookupObject__c + (' != ' + searchValue + orClause);
+        if (RollupFieldInitializer.Current.getSObjectFieldByName(fieldTokens, meta.RollupFieldOnLookupObject__c)?.getDescribe().isFilterable() != true) {
+          continue;
         }
+        isValidRun = isValidRun || true;
+        Object searchObject = getDefaultValue(meta, invokePoint);
+        String searchValue = String.valueOf(searchObject);
+        if (searchObject instanceof String) {
+          searchValue = '\'' + searchValue + '\'';
+        }
+
+        additionalFilters += meta.RollupFieldOnLookupObject__c + (' != ' + searchValue + orClause);
       }
     }
 
@@ -131,5 +159,16 @@ public without sharing class RollupParentResetProcessor extends RollupFullBatchR
 
   private static Object getDefaultValue(Rollup__mdt meta, InvocationPoint invokePoint) {
     return new RollupAsyncProcessor.NoOpProcessor(invokePoint).getDefaultValue(meta);
+  }
+
+  private String arrangeCabooses() {
+    RollupAsyncProcessor possibleNewConductor;
+
+    if (this.rollups.isEmpty() == false) {
+      possibleNewConductor = this.rollups.remove(0);
+      possibleNewConductor.rollups.addAll(this.rollups);
+    }
+
+    return possibleNewConductor?.runCalc();
   }
 }

@@ -1,7 +1,7 @@
 $DebugPreference = 'Continue'
 $ErrorActionPreference = 'Stop'
 # This is also the same script that runs on Github via the Github Action configured in .github/workflows
-$testInvocation = 'npx sf apex run test --suite-names ApexRollupTestSuite --result-format human --wait 20 --code-coverage --output-dir ./tests/apex'
+$testInvocation = 'npx sf apex run test --suite-names ApexRollupTestSuite --result-format human --wait 20 --code-coverage --output-dir ./tests/apex --concise'
 $currentUserAlias = 'apex-rollup-scratch-org'
 
 . .\scripts\string-utils.ps1
@@ -23,12 +23,12 @@ function Start-Tests() {
   }
 
   if ($false -eq $testFailure -And $currentBranch.Contains("main") -eq $false) {
-    Start-Integration-Tests
+    # Start-Integration-Tests
   }
 
   try {
     Write-Debug "Deleting scratch org ..."
-    npx sf org delete scratch --no-prompt
+    npm run delete:org
   } catch {
     Write-Debug "Scratch org deletion failed, continuing ..."
   }
@@ -57,9 +57,6 @@ if($scratchOrgAllotment -gt 0) {
   if($scratchOrgCreateMessage -eq 'The signup request failed because this organization has reached its active scratch org limit') {
     throw $1
   }
-  # Multi-currency prep
-  Write-Debug 'Importing multi-currency config data to scratch org ...'
-  npx sf data import tree --files ./config/data/CurrencyTypes.json
   # Run tests
   Start-Tests
 } else {

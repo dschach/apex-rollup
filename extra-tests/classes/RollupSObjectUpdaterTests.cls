@@ -65,7 +65,7 @@ public class RollupSObjectUpdaterTests {
     RollupPlugin.parameterMock = new RollupPluginParameter__mdt(Value__c = DispatcherMock.class.getName());
     RollupSObjectUpdater updater = new RollupSObjectUpdater();
 
-    updater.doUpdate(new List<SObjecT>{ new Account() });
+    updater.doUpdate(new List<SObject>{ new Account() });
 
     System.assertEquals(true, dispatcherMockWasCalled);
   }
@@ -141,13 +141,48 @@ public class RollupSObjectUpdaterTests {
     System.assertNotEquals(initial, RollupSettings__c.getInstance());
   }
 
+  @IsTest
+  static void shouldThrowWhenControlValueEnabledForFailedSaves() {
+    RollupSObjectUpdater updater = new RollupSObjectUpdater();
+    updater.addRollupControl(new RollupControl__mdt(ShouldThrowOnSaveErrors__c = true));
+
+    String message = '';
+    try {
+      updater.doUpdate(new List<SObject>{ new Account() });
+      Assert.fail('Error should be thrown for account without Id');
+    } catch (System.DmlException ex) {
+      message = ex.getMessage();
+    }
+
+    Assert.areEqual('Update failed. First exception on row 0; first error: MISSING_ARGUMENT, Id not specified in an update call: []', message);
+  }
+
+  @IsTest
+  static void nullRollupControlDoesNotPreventExecution() {
+    RollupLimits.stubbedQueryRows = 50001;
+    RollupControl__mdt control = new RollupControl__mdt();
+    RollupSObjectUpdater updater = new RollupSObjectUpdater();
+
+    updater.forceSyncUpdate();
+    updater.addRollupControl(control);
+    control = null;
+
+    Exception ex;
+    try {
+      updater.doUpdate(new List<SObject>{ new Account(Id = RollupTestUtils.createId(Account.SObjectType)) });
+    } catch (Exception e) {
+      ex = e;
+    }
+    Assert.isNull(ex);
+  }
+
   public class MockUpdater implements RollupSObjectUpdater.IUpdater {
     public void performUpdate(List<SObject> recordsToUpdate, Database.DMLOptions options) {
       mockUpdatedRecords = recordsToUpdate;
     }
   }
 
-  @SuppressWarnings('PMD.EmptyWhileStmt')
+  @SuppressWarnings('PMD.EmptyStatementBlock,PMD.EmptyWhileStmt')
   private static void waitSeconds(Integer secondAmount) {
     Datetime nowish = System.now();
     while (System.now() < nowish.addSeconds(secondAmount)) {

@@ -4,13 +4,12 @@ public class RollupDispatch implements RollupSObjectUpdater.IDispatcher {
   @TestVisible
   private static String platformEventOverride;
 
+  @SuppressWarnings('PMD.PropertyNamingConventions')
   private static String PLATFORM_EVENT_BOOLEAN_STRING {
     get {
-      if (PLATFORM_EVENT_BOOLEAN_STRING == null && platformEventOverride != null) {
-        PLATFORM_EVENT_BOOLEAN_STRING = platformEventOverride;
-      } else if (PLATFORM_EVENT_BOOLEAN_STRING == null) {
-        String potentialBooleanString = RollupPluginParameter__mdt.getInstance('ShouldFirePlatformEvent')?.Value__c;
-        PLATFORM_EVENT_BOOLEAN_STRING = potentialBooleanString == null ? String.valueOf(false) : potentialBooleanString;
+      if (PLATFORM_EVENT_BOOLEAN_STRING == null) {
+        PLATFORM_EVENT_BOOLEAN_STRING = platformEventOverride ?? RollupPluginParameter__mdt.getInstance('ShouldFirePlatformEvent')?.Value__c ??
+          String.valueOf(false);
       }
       return PLATFORM_EVENT_BOOLEAN_STRING;
     }

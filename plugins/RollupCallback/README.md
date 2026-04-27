@@ -43,7 +43,7 @@ export default class RollupChangeNotifier extends LightningElement {
 <!-- in rollupChangeNotifier.js-meta.xml -->
 <?xml version="1.0" encoding="UTF-8"?>
 <LightningComponentBundle xmlns="http://soap.sforce.com/2006/04/metadata">
-    <apiVersion>59.0</apiVersion>
+    <apiVersion>63.0</apiVersion>
     <isExposed>true</isExposed>
     <masterLabel>Rollup Change Notifier</masterLabel>
     <targets>
@@ -104,12 +104,12 @@ public class SubflowRollupDispatcher implements RollupSObjectUpdater.IDispatcher
     List<SObjectDecorator> wrappedRecords = new List<SObjectDecorator>();
     for (SObject record : records) {
       SObjectDecorator decorator = new SObjectDecorator();
-      decorator.SObjectName = record.getSObjectType().getDescribe().getName();
+      decorator.SObjectName = record.getSObjectType().toString();
       decorator.RecordId = record.Id;
       decorator.FieldNames = new List<String>(record.getPopulatedFieldsAsMap().keySet());
       wrappedRecords.add(decorator);
     }
-    Flow.Interview rollupSubflow = Flow.Interview.RollupSubflow(
+    Flow.Interview rollupSubflow = new Flow.Interview.RollupSubflow(
       new Map<String, Object>{
         'records' => wrappedRecords
       }

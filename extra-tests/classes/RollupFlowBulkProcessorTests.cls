@@ -14,16 +14,34 @@ private class RollupFlowBulkProcessorTests {
     System.assertEquals('No records', outputs[0].message);
   }
 
-  private class CachedRollup extends Rollup {
-    public List<Rollup> getCurrentlyCachedRollups() {
-      return this.getCachedRollups();
-    }
+  @IsTest
+  static void skipsAddingRollupForNoOps() {
+    RollupFlowBulkProcessor.FlowInput input = new RollupFlowBulkProcessor.FlowInput();
+    // this contact should be filtered out due to not having an AccountId filled out
+    input.recordsToRollup = new List<SObject>{ new Contact() };
+    input.rollupContext = 'INSERT';
+
+    Rollup.rollupMetadata = new List<Rollup__mdt>{
+      new Rollup__mdt(
+        RollupOperation__c = 'CONCAT',
+        CalcItem__c = 'Contact',
+        LookupObject__c = 'Account',
+        RollupFieldOnCalcItem__c = 'FirstName',
+        LookupFieldOnCalcItem__c = 'AccountId',
+        LookupFieldOnLookupObject__c = 'Id',
+        RollupFieldOnLookupObject__c = 'Name'
+      )
+    };
+
+    RollupFlowBulkProcessor.addRollup(new List<RollupFlowBulkProcessor.FlowInput>{ input });
+
+    System.assertEquals(true, Rollup.CACHED_ROLLUPS.isEmpty());
   }
 
   @IsTest
   static void shouldAddToRollupsIfCMDTPresent() {
     RollupFlowBulkProcessor.FlowInput input = new RollupFlowBulkProcessor.FlowInput();
-    input.recordsToRollup = new List<SObject>{ new Contact() };
+    input.recordsToRollup = new List<SObject>{ new Contact(AccountId = RollupTestUtils.createId(Account.SObjectType)) };
     input.rollupContext = 'INSERT';
 
     Rollup.rollupMetadata = new List<Rollup__mdt>{
@@ -44,7 +62,7 @@ private class RollupFlowBulkProcessorTests {
     for (Rollup.FlowOutput output : outputs) {
       System.assertEquals(true, outputs[0].isSuccess, 'Should not error when adding deferred flow rollup');
     }
-    System.assertNotEquals(true, new CachedRollup().getCurrentlyCachedRollups().isEmpty(), 'Deferred rollup should be kept in buffer');
+    System.assertNotEquals(true, Rollup.CACHED_ROLLUPS.isEmpty(), 'Deferred rollup should be kept in buffer');
   }
 
   @IsTest
@@ -82,13 +100,13 @@ private class RollupFlowBulkProcessorTests {
     RollupFlowBulkProcessor.addRollup(new List<RollupFlowBulkProcessor.FlowInput>{ input });
     Test.stopTest();
 
-    System.assertEquals(1, new CachedRollup().getCurrentlyCachedRollups().size());
+    System.assertEquals(1, Rollup.CACHED_ROLLUPS.size());
   }
 
   @IsTest
   static void shouldClearOldParentForIntermediateReparenting() {
     Account oldGrandparent = [SELECT Id, Name FROM Account];
-    oldGrandparent.NaicsDesc = oldGrandparent.Name;
+    oldGrandparent.Site = oldGrandparent.Name;
     update oldGrandparent;
     Rollup.onlyUseMockMetadata = true;
     Rollup.rollupMetadata = new List<Rollup__mdt>{
@@ -99,12 +117,12 @@ private class RollupFlowBulkProcessorTests {
         RollupFieldOnCalcItem__c = 'Name',
         LookupFieldOnCalcItem__c = 'ContactPointPhoneId',
         LookupFieldOnLookupObject__c = 'Id',
-        RollupFieldOnLookupObject__c = 'NaicsDesc',
+        RollupFieldOnLookupObject__c = 'Site',
         GrandparentRelationshipFieldPath__c = 'ContactPointPhone.Parent.Name'
       )
     };
     Account newGrandparent = new Account(Name = 'New Grandparent Again');
-    newGrandparent.NaicsDesc = newGrandparent.Name;
+    newGrandparent.Site = newGrandparent.Name;
     ContactPointPhone parent = new ContactPointPhone(TelephoneNumber = 'Parent Again', ParentId = oldGrandparent.Id);
     insert new List<SObject>{ parent, newGrandparent };
     ContactPointAddress grandchild = new ContactPointAddress(Name = 'Hello Again', ContactPointPhoneId = parent.Id);
@@ -123,16 +141,16 @@ private class RollupFlowBulkProcessorTests {
     RollupFlowBulkProcessor.addRollup(new List<RollupFlowBulkProcessor.FlowInput>{ input });
     Test.stopTest();
 
-    newGrandparent = [SELECT NaicsDesc FROM Account WHERE Id = :newGrandparent.Id];
-    System.assertEquals(grandchild.Name, newGrandparent.NaicsDesc);
-    oldGrandparent = [SELECT NaicsDesc FROM Account WHERE Id = :oldGrandparent.Id];
-    System.assertEquals(null, oldGrandparent.NaicsDesc, 'Old grandparent value should have been cleared');
+    newGrandparent = [SELECT Site FROM Account WHERE Id = :newGrandparent.Id];
+    System.assertEquals(grandchild.Name, newGrandparent.Site);
+    oldGrandparent = [SELECT Site FROM Account WHERE Id = :oldGrandparent.Id];
+    System.assertEquals(null, oldGrandparent.Site, 'Old grandparent value should have been cleared');
   }
 
   @IsTest
   static void shouldClearGrandparentForIntermediateParentDeletion() {
     Account oldGrandparent = [SELECT Id, Name FROM Account];
-    oldGrandparent.NaicsDesc = oldGrandparent.Name;
+    oldGrandparent.Site = oldGrandparent.Name;
     update oldGrandparent;
     Rollup.onlyUseMockMetadata = true;
     Rollup.rollupMetadata = new List<Rollup__mdt>{
@@ -143,7 +161,7 @@ private class RollupFlowBulkProcessorTests {
         RollupFieldOnCalcItem__c = 'Name',
         LookupFieldOnCalcItem__c = 'ContactPointPhoneId',
         LookupFieldOnLookupObject__c = 'Id',
-        RollupFieldOnLookupObject__c = 'NaicsDesc',
+        RollupFieldOnLookupObject__c = 'Site',
         GrandparentRelationshipFieldPath__c = 'ContactPointPhone.Parent.Name'
       )
     };
@@ -163,8 +181,8 @@ private class RollupFlowBulkProcessorTests {
     RollupFlowBulkProcessor.addRollup(new List<RollupFlowBulkProcessor.FlowInput>{ input });
     Test.stopTest();
 
-    oldGrandparent = [SELECT NaicsDesc FROM Account WHERE Id = :oldGrandparent.Id];
-    System.assertEquals(null, oldGrandparent.NaicsDesc, 'Old grandparent value should have been cleared');
+    oldGrandparent = [SELECT Site FROM Account WHERE Id = :oldGrandparent.Id];
+    System.assertEquals(null, oldGrandparent.Site, 'Old grandparent value should have been cleared');
   }
 
   @IsTest
@@ -196,7 +214,7 @@ private class RollupFlowBulkProcessorTests {
 
     acc = [SELECT AnnualRevenue FROM Account WHERE Id = :acc.Id];
     System.assertEquals(5, acc.AnnualRevenue);
-    System.assertEquals(0, new CachedRollup().getCurrentlyCachedRollups().size(), 'Flow rollup buffer should have been flushed!');
+    System.assertEquals(0, Rollup.CACHED_ROLLUPS.size(), 'Flow rollup buffer should have been flushed!');
   }
 
   @IsTest
@@ -370,6 +388,7 @@ private class RollupFlowBulkProcessorTests {
         RollupFieldOnLookupObject__c = 'AboutMe'
       )
     };
+    Rollup.onlyUseMockMetadata = true;
     RollupFlowBulkProcessor.FlowInput input = new RollupFlowBulkProcessor.FlowInput();
     input.recordsToRollup = new List<SObject>{ new Opportunity(Amount = 5, Id = RollupTestUtils.createId(Opportunity.SObjectType)) };
     input.rollupContext = 'INSERT';
@@ -619,5 +638,115 @@ private class RollupFlowBulkProcessorTests {
 
     Individual updatedIndy = [SELECT Id, ConsumerCreditScore FROM Individual WHERE Id = :indy.Id];
     System.assertEquals(secondChild.AnnualRevenue, updatedIndy.ConsumerCreditScore);
+  }
+
+  @IsTest
+  static void doesNotNoOpForSomeAllNoneRollups() {
+    Rollup.rollupMetadata = new List<Rollup__mdt>{
+      new Rollup__mdt(
+        RollupFieldOnCalcItem__c = 'Id',
+        LookupObject__c = 'Account',
+        LookupFieldOnCalcItem__c = 'AccountId',
+        LookupFieldOnLookupObject__c = 'Id',
+        RollupFieldOnLookupObject__c = 'AnnualRevenue',
+        RollupOperation__c = 'SOME',
+        CalcItem__c = 'Contact',
+        CalcItemWhereClause__c = 'FirstName != \'One\''
+      ),
+      new Rollup__mdt(
+        RollupFieldOnCalcItem__c = 'Id',
+        LookupObject__c = 'Account',
+        LookupFieldOnCalcItem__c = 'AccountId',
+        LookupFieldOnLookupObject__c = 'Id',
+        RollupFieldOnLookupObject__c = 'Description',
+        RollupOperation__c = 'ALL',
+        CalcItem__c = 'Contact',
+        CalcItemWhereClause__c = 'FirstName != \'One\''
+      ),
+      new Rollup__mdt(
+        RollupFieldOnCalcItem__c = 'Id',
+        LookupObject__c = 'Account',
+        LookupFieldOnCalcItem__c = 'AccountId',
+        LookupFieldOnLookupObject__c = 'Id',
+        RollupFieldOnLookupObject__c = 'NumberOfEmployees',
+        RollupOperation__c = 'NONE',
+        CalcItem__c = 'Contact',
+        CalcItemWhereClause__c = 'FirstName != \'One\''
+      )
+    };
+    Rollup.onlyUseMockMetadata = true;
+    Account acc = (Account) RollupTestUtils.queryRecord(Account.SObjectType, new List<Schema.SObjectField>());
+    acc.Description = 'true';
+    acc.AnnualRevenue = 1;
+    acc.NumberOfEmployees = 0;
+    RollupAsyncProcessor.stubParentRecords = new List<SObject>{ acc };
+
+    Rollup.records = new List<Contact>{ new Contact(FirstName = 'One', AccountId = acc.Id) };
+
+    RollupFlowBulkProcessor.FlowInput input = new RollupFlowBulkProcessor.FlowInput();
+    input.recordsToRollup = new List<Contact>{ new Contact(FirstName = 'One', AccountId = acc.Id, Id = RollupTestUtils.createId(Contact.SObjectType)) };
+    input.oldRecordsToRollup = new List<SObject>{ new Contact(Id = input.recordsToRollup[0].Id, FirstName = 'One', AccountId = acc.Id) };
+    input.rollupContext = 'UPDATE';
+    input.deferProcessing = false;
+
+    Test.startTest();
+    RollupFlowBulkProcessor.addRollup(new List<RollupFlowBulkProcessor.FlowInput>{ input });
+    Test.stopTest();
+
+    Assert.areEqual('false', acc.Description);
+    Assert.areEqual(0, acc.AnnualRevenue);
+    Assert.areEqual(1, acc.NumberOfEmployees);
+  }
+
+  @IsTest
+  static void worksWithMixOfParentAndChildRollups() {
+    Account acc = [SELECT Id FROM Account];
+    Account secondAccount = new Account(Name = 'Second');
+    insert secondAccount;
+    Opportunity opp = new Opportunity(AccountId = acc.Id, Amount = 1, CloseDate = System.today(), Name = 'Test Opportunity', StageName = 'a');
+    insert opp;
+    insert new List<Task>{ new Task(WhatId = opp.Id, Subject = 'Test Task') };
+
+    Rollup.onlyUseMockMetadata = true;
+    Rollup.rollupMetadata = new List<Rollup__mdt>{
+      new Rollup__mdt(
+        CalcItem__c = 'ContactPointAddress',
+        RollupFieldOnCalcItem__c = 'PreferenceRank',
+        LookupFieldOnCalcItem__c = 'ParentId',
+        LookupObject__c = 'Account',
+        LookupFieldOnLookupObject__c = 'Id',
+        RollupFieldOnLookupObject__c = 'AnnualRevenue',
+        RollupOperation__c = 'SUM'
+      ),
+      new Rollup__mdt(
+        ChangedFieldsOnCalcItem__c = 'Subject',
+        CalcItem__c = 'Task',
+        RollupFieldOnCalcItem__c = 'Id',
+        LookupFieldOnCalcItem__c = 'WhatId',
+        LookupObject__c = 'Opportunity',
+        LookupFieldOnLookupObject__c = 'Id',
+        RollupFieldOnLookupObject__c = 'Amount',
+        RollupOperation__c = 'COUNT',
+        IsRollupStartedFromParent__c = true
+      )
+    };
+
+    List<ContactPointAddress> cpas = new List<ContactPointAddress>{
+      new ContactPointAddress(ParentId = acc.Id, PreferenceRank = 1, Id = RollupTestUtils.createId(ContactPointAddress.SObjectType))
+    };
+
+    Test.startTest();
+    Rollup.apexContext = TriggerOperation.AFTER_UPDATE;
+    Rollup.shouldRun = true;
+    RollupFlowBulkProcessor.FlowInput input = new RollupFlowBulkProcessor.FlowInput();
+    input.recordsToRollup = cpas;
+    input.rollupContext = 'UPSERT';
+    input.oldRecordsToRollup = new List<ContactPointAddress>{ new ContactPointAddress(ParentId = secondAccount.Id, PreferenceRank = 0, Id = cpas[0].Id) };
+    input.deferProcessing = false;
+    RollupFlowBulkProcessor.addRollup(new List<RollupFlowBulkProcessor.FlowInput>{ input });
+    Test.stopTest();
+
+    acc = [SELECT AnnualRevenue FROM Account WHERE Id = :acc.Id];
+    Assert.areEqual(1, acc.AnnualRevenue);
   }
 }

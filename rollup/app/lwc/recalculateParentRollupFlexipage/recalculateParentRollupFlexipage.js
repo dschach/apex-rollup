@@ -34,21 +34,26 @@ export default class RecalculateParentRollupFlexipage extends LightningElement {
   @wire(getRecord, { recordId: '$recordId', fields: [], optionalFields: '$alternativeField' })
   wiredRecord({ data }) {
     if (data && this.alternativeParentFieldName) {
+      // eslint-disable-next-line @lwc/lwc/no-api-reassignments
       this.recordId = data.fields[this.alternativeParentFieldName]?.value ?? this.recordId;
       this._setup();
     }
   }
 
+  @api
   async handleClick() {
     this.isRecalculating = true;
 
     if (this._matchingMetas.length > 0) {
       try {
-        await performSerializedBulkFullRecalc({ serializedMetadata: JSON.stringify(this._matchingMetas), invokePointName: 'FROM_SINGULAR_PARENT_RECALC_LWC' });
+        const serverResponse = await performSerializedBulkFullRecalc({
+          serializedMetadata: JSON.stringify(this._matchingMetas),
+          invokePointName: 'FROM_SINGULAR_PARENT_RECALC_LWC'
+        });
+        await this.template.querySelector('c-rollup-job-poller').runJobPoller(serverResponse);
         this.dispatchEvent(new RefreshEvent());
       } catch (err) {
-        // eslint-disable-next-line
-        console.error(err);
+        this.logErrorToConsole(err);
       }
     }
 
@@ -56,14 +61,16 @@ export default class RecalculateParentRollupFlexipage extends LightningElement {
   }
 
   async _setup() {
+    this._matchingMetas = [];
     try {
-      if (!this._namespaceInfo.namespace) {
+      if (!this._namespaceInfo?.namespace) {
         this._namespaceInfo = await getNamespaceInfo();
       }
       const metas = await getRollupMetadata();
       this._fillValidMetadata(metas);
     } catch (err) {
       this.isValid = false;
+      this.logErrorToConsole(err);
     }
   }
 
@@ -80,6 +87,7 @@ export default class RecalculateParentRollupFlexipage extends LightningElement {
     });
 
     this.isValid = this._matchingMetas.length > 0;
+    this.dispatchEvent(new CustomEvent('loadingfinished', { detail: { isValid: this.isValid } }));
   }
 
   _addMatchingMetadata(metadata) {
@@ -99,9 +107,13 @@ export default class RecalculateParentRollupFlexipage extends LightningElement {
     const orderByFieldName = this._getNamespaceSafeFieldName('RollupOrderBys__r');
     const children = metadata[orderByFieldName];
     transformToSerializableChildren(metadata, orderByFieldName, children);
-
     this._matchingMetas.push(metadata);
   }
 
-  _getNamespaceSafeFieldName = fieldName => `${this._namespaceInfo.namespace + fieldName}`;
+  logErrorToConsole(err) {
+    // eslint-disable-next-line
+    console.error(err);
+  }
+
+  _getNamespaceSafeFieldName = fieldName => `${(this._namespaceInfo?.namespace ?? '') + fieldName}`;
 }

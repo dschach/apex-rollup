@@ -1,5 +1,5 @@
 @IsTest
-private class RollupIntegrationTests {
+private class RollupIntegrationTests implements Database.Batchable<SObject> {
   @TestSetup
   static void setup() {
     Rollup.onlyUseMockMetadata = true;
@@ -36,8 +36,8 @@ private class RollupIntegrationTests {
       new Rollup__mdt(
         RollupFieldOnCalcItem__c = 'Amount',
         LookupObject__c = 'Account',
-        LookupFieldOnCalcItem__c = Opportunity.AccountIdText__c.getDescribe().getName(),
-        LookupFieldOnLookupObject__c = Account.AccountIdText__c.getDescribe().getName(),
+        LookupFieldOnCalcItem__c = Opportunity.AccountIdText__c.toString(),
+        LookupFieldOnLookupObject__c = Account.AccountIdText__c.toString(),
         RollupFieldOnLookupObject__c = 'AnnualRevenue',
         RollupOperation__c = 'MAX',
         CalcItem__c = 'Opportunity'
@@ -68,7 +68,7 @@ private class RollupIntegrationTests {
 
     Rollup.rollupMetadata = new List<Rollup__mdt>{
       new Rollup__mdt(
-        RollupFieldOnCalcItem__c = Opportunity.AmountFormula__c.getDescribe().getName(),
+        RollupFieldOnCalcItem__c = Opportunity.AmountFormula__c.toString(),
         LookupObject__c = 'Account',
         LookupFieldOnCalcItem__c = 'AccountId',
         LookupFieldOnLookupObject__c = 'Id',
@@ -150,19 +150,15 @@ private class RollupIntegrationTests {
     Rollup.records = applications;
 
     Rollup.FlowInput input = new Rollup.FlowInput();
-    input.lookupFieldOnCalcItem = Application__c.ParentApplication__c.getDescribe().getName();
+    input.lookupFieldOnCalcItem = Application__c.ParentApplication__c.toString();
     input.lookupFieldOnOpObject = 'Id';
     input.recordsToRollup = applications;
     input.rollupContext = 'INSERT';
-    input.rollupFieldOnCalcItem = Application__c.Engagement_Score__c.getDescribe().getName();
-    input.rollupFieldOnOpObject = ParentApplication__c.Engagement_Rollup__c.getDescribe().getName();
+    input.rollupFieldOnCalcItem = Application__c.Engagement_Score__c.toString();
+    input.rollupFieldOnOpObject = ParentApplication__c.Engagement_Rollup__c.toString();
     input.rollupOperation = 'AVERAGE';
-    input.rollupSObjectName = ParentApplication__c.SObjectType.getDescribe(SObjectDescribeOptions.DEFERRED).getName();
-    input.calcItemWhereClause =
-      Application__c.Something_With_Underscores__c.getDescribe().getName() +
-      ' != \'' +
-      applications[0].Something_With_Underscores__c +
-      '\'';
+    input.rollupSObjectName = ParentApplication__c.SObjectType.toString();
+    input.calcItemWhereClause = Application__c.Something_With_Underscores__c.toString() + ' != \'' + applications[0].Something_With_Underscores__c + '\'';
 
     Test.startTest();
     Rollup.performRollup(new List<Rollup.FlowInput>{ input });
@@ -188,16 +184,16 @@ private class RollupIntegrationTests {
     insert apps;
 
     Rollup.FlowInput input = new Rollup.FlowInput();
-    input.lookupFieldOnCalcItem = Application__c.ParentApplication__c.getDescribe().getName();
+    input.lookupFieldOnCalcItem = Application__c.ParentApplication__c.toString();
     input.lookupFieldOnOpObject = 'Id';
     input.recordsToRollup = new List<ParentApplication__c>{ parentApp };
     input.rollupContext = 'INSERT';
-    input.rollupFieldOnCalcItem = Application__c.Engagement_Score__c.getDescribe().getName();
-    input.rollupFieldOnOpObject = ParentApplication__c.Engagement_Rollup__c.getDescribe().getName();
+    input.rollupFieldOnCalcItem = Application__c.Engagement_Score__c.toString();
+    input.rollupFieldOnOpObject = ParentApplication__c.Engagement_Rollup__c.toString();
     input.rollupOperation = 'SUM';
-    input.rollupSObjectName = ParentApplication__c.SObjectType.getDescribe(SObjectDescribeOptions.DEFERRED).getName();
+    input.rollupSObjectName = ParentApplication__c.SObjectType.toString();
     input.isRollupStartedFromParent = true;
-    input.calcItemTypeWhenRollupStartedFromParent = Application__c.SObjectType.getDescribe(SObjectDescribeOptions.DEFERRED).getName();
+    input.calcItemTypeWhenRollupStartedFromParent = Application__c.SObjectType.toString();
 
     Test.startTest();
     Rollup.performRollup(new List<Rollup.FlowInput>{ input });
@@ -283,9 +279,9 @@ private class RollupIntegrationTests {
     Rollup.records = appLogs;
     Rollup.rollupMetadata = new List<Rollup__mdt>{
       new Rollup__mdt(
-        CalcItem__c = ApplicationLog__c.SObjectType.getDescribe(SObjectDescribeOptions.DEFERRED).getName(),
-        RollupFieldOnCalcItem__c = ApplicationLog__c.Object__c.getDescribe().getName(),
-        LookupFieldOnCalcItem__c = ApplicationLog__c.Application__c.getDescribe().getName(),
+        CalcItem__c = ApplicationLog__c.SObjectType.toString(),
+        RollupFieldOnCalcItem__c = ApplicationLog__c.Object__c.toString(),
+        LookupFieldOnCalcItem__c = ApplicationLog__c.Application__c.toString(),
         LookupObject__c = 'Account',
         LookupFieldOnLookupObject__c = 'Id',
         RollupFieldOnLookupObject__c = 'Name',
@@ -382,6 +378,17 @@ private class RollupIntegrationTests {
         LookupFieldOnLookupObject__c = 'Id',
         GrandparentRelationshipFieldPath__c = 'Contacts.Individual.ConsumerCreditScore',
         OneToManyGrandparentFields__c = 'Contact.AccountId'
+      ),
+      new Rollup__mdt(
+        CalcItem__c = 'Account',
+        LookupObject__c = 'Individual',
+        LookupFieldOnCalcItem__c = 'Id',
+        RollupOperation__c = 'COUNT',
+        RollupFieldOnLookupObject__c = 'InfluencerRating',
+        RollupFieldOnCalcItem__c = 'CleanStatus',
+        LookupFieldOnLookupObject__c = 'Id',
+        GrandparentRelationshipFieldPath__c = 'Contacts.Individual.ConsumerCreditScore',
+        OneToManyGrandparentFields__c = 'Contact.AccountId'
       )
     };
     Rollup.shouldRun = true;
@@ -393,12 +400,13 @@ private class RollupIntegrationTests {
     Rollup.runFromTrigger();
     Test.stopTest();
 
-    Individual updatedIndy = [SELECT Id, ConsumerCreditScore FROM Individual WHERE Id = :indy.Id];
+    Individual updatedIndy = [SELECT Id, ConsumerCreditScore, InfluencerRating FROM Individual WHERE Id = :indy.Id];
     System.assertEquals(
       acc.AnnualRevenue,
       updatedIndy.ConsumerCreditScore,
       'Apex grandparent rollup should run with reparenting change to intermediate records'
     );
+    System.assertEquals(1, updatedIndy.InfluencerRating);
   }
 
   @IsTest
@@ -411,9 +419,9 @@ private class RollupIntegrationTests {
     Rollup.shouldFlattenAsyncProcesses = true;
     Rollup.rollupMetadata = new List<Rollup__mdt>{
       new Rollup__mdt(
-        CalcItem__c = ApplicationLog__c.SObjectType.getDescribe(SObjectDescribeOptions.DEFERRED).getName(),
+        CalcItem__c = ApplicationLog__c.SObjectType.toString(),
         RollupFieldOnCalcItem__c = 'Name',
-        LookupFieldOnCalcItem__c = ApplicationLog__c.Application__c.getDescribe().getName(),
+        LookupFieldOnCalcItem__c = ApplicationLog__c.Application__c.toString(),
         LookupObject__c = 'Account',
         LookupFieldOnLookupObject__c = 'Id',
         RollupFieldOnLookupObject__c = 'Name',
@@ -464,9 +472,9 @@ private class RollupIntegrationTests {
     Rollup.shouldFlattenAsyncProcesses = true;
     Rollup.rollupMetadata = new List<Rollup__mdt>{
       new Rollup__mdt(
-        CalcItem__c = ApplicationLog__c.SObjectType.getDescribe(SObjectDescribeOptions.DEFERRED).getName(),
+        CalcItem__c = ApplicationLog__c.SObjectType.toString(),
         RollupFieldOnCalcItem__c = 'Name',
-        LookupFieldOnCalcItem__c = ApplicationLog__c.Application__c.getDescribe().getName(),
+        LookupFieldOnCalcItem__c = ApplicationLog__c.Application__c.toString(),
         LookupObject__c = 'Account',
         LookupFieldOnLookupObject__c = 'Id',
         RollupFieldOnLookupObject__c = 'Name',
@@ -534,9 +542,9 @@ private class RollupIntegrationTests {
 
     Rollup.rollupMetadata = new List<Rollup__mdt>{
       new Rollup__mdt(
-        CalcItem__c = ApplicationLog__c.SObjectType.getDescribe(SObjectDescribeOptions.DEFERRED).getName(),
+        CalcItem__c = ApplicationLog__c.SObjectType.toString(),
         RollupFieldOnCalcItem__c = 'Name',
-        LookupFieldOnCalcItem__c = ApplicationLog__c.Application__c.getDescribe().getName(),
+        LookupFieldOnCalcItem__c = ApplicationLog__c.Application__c.toString(),
         LookupObject__c = 'Account',
         LookupFieldOnLookupObject__c = 'Id',
         RollupFieldOnLookupObject__c = 'Name',
@@ -584,9 +592,9 @@ private class RollupIntegrationTests {
     Rollup.shouldRun = true;
     Rollup.FlowInput input = new Rollup.FlowInput();
     input.recordsToRollup = parentApps;
-    input.calcItemTypeWhenRollupStartedFromParent = ApplicationLog__c.SObjectType.getDescribe(SObjectDescribeOptions.DEFERRED).getName();
-    input.rollupFieldOnCalcItem = ApplicationLog__c.Name.getDescribe().getName();
-    input.lookupFieldOnCalcItem = ApplicationLog__c.Application__c.getDescribe().getName();
+    input.calcItemTypeWhenRollupStartedFromParent = ApplicationLog__c.SObjectType.toString();
+    input.rollupFieldOnCalcItem = ApplicationLog__c.Name.toString();
+    input.lookupFieldOnCalcItem = ApplicationLog__c.Application__c.toString();
     input.rollupSObjectName = 'Account';
     input.lookupFieldOnOpObject = 'Id';
     input.rollupFieldOnOpObject = 'Name';
@@ -638,9 +646,9 @@ private class RollupIntegrationTests {
     Rollup.records = appLogs;
     Rollup.rollupMetadata = new List<Rollup__mdt>{
       new Rollup__mdt(
-        CalcItem__c = ApplicationLog__c.getSObjectType().getDescribe().getName(),
-        RollupFieldOnCalcItem__c = ApplicationLog__c.Name.getDescribe().getName(),
-        LookupFieldOnCalcItem__c = ApplicationLog__c.Application__c.getDescribe().getName(),
+        CalcItem__c = ApplicationLog__c.getSObjectType().toString(),
+        RollupFieldOnCalcItem__c = ApplicationLog__c.Name.toString(),
+        LookupFieldOnCalcItem__c = ApplicationLog__c.Application__c.toString(),
         LookupObject__c = 'Account',
         LookupFieldOnLookupObject__c = 'Id',
         RollupFieldOnLookupObject__c = 'Name',
@@ -671,6 +679,53 @@ private class RollupIntegrationTests {
 
     Account updatedGreatGrandparent = [SELECT Name FROM Account WHERE Id = :greatGrandparent.Id];
     System.assertEquals(greatGrandparent.Name, updatedGreatGrandparent.Name, 'Great-grandparent name should not have been appended based on exclusions');
+  }
+
+  @IsTest
+  static void shouldCountDistinctForGrandparentDeletes() {
+    if (RollupTestUtils.IS_NAMESPACED_PACKAGE_ORG) {
+      return;
+    }
+
+    Rollup.onlyUseMockMetadata = true;
+    Rollup.shouldFlattenAsyncProcesses = true;
+    Rollup.rollupMetadata = new List<Rollup__mdt>{
+      new Rollup__mdt(
+        CalcItem__c = ApplicationLog__c.SObjectType.toString(),
+        RollupFieldOnCalcItem__c = 'Name',
+        LookupFieldOnCalcItem__c = ApplicationLog__c.Application__c.toString(),
+        LookupObject__c = 'Account',
+        LookupFieldOnLookupObject__c = 'Id',
+        RollupFieldOnLookupObject__c = 'AnnualRevenue',
+        RollupOperation__c = 'COUNT_DISTINCT',
+        GrandparentRelationshipFieldPath__c = RollupTestUtils.getRelationshipPath(
+          new List<Schema.SObjectField>{ ApplicationLog__c.Application__c, Application__c.ParentApplication__c, ParentApplication__c.Account__c, Account.Name }
+        )
+      )
+    };
+
+    Account greatGrandparent = new Account(Name = 'Great-grandparent 1');
+    insert greatGrandparent;
+
+    ParentApplication__c grandParent = new ParentApplication__c(Name = 'Grandparent 1', Account__c = greatGrandparent.Id);
+    ParentApplication__c secondGrandparent = new ParentApplication__c(Name = 'Grandparent 2', Account__c = greatGrandparent.Id);
+    List<ParentApplication__c> parentApps = new List<ParentApplication__c>{ grandParent, secondGrandparent };
+    insert parentApps;
+
+    Application__c parent = new Application__c(Name = 'Parent 1', ParentApplication__c = grandParent.Id);
+    Application__c secondParent = new Application__c(Name = 'Parent 2', ParentApplication__c = secondGrandparent.Id);
+    insert new List<Application__c>{ parent, secondParent };
+
+    ApplicationLog__c child = new ApplicationLog__c(Application__c = secondParent.Id, Name = 'Will Still Exist');
+    ApplicationLog__c secondChild = new ApplicationLog__c(Name = 'To be deleted', Application__c = parent.Id);
+    insert new List<ApplicationLog__c>{ child, secondChild };
+
+    Test.startTest();
+    delete secondChild;
+    Test.stopTest();
+
+    greatGrandparent = [SELECT AnnualRevenue FROM Account WHERE Id = :greatGrandparent.Id];
+    Assert.areEqual(1, greatGrandparent.AnnualRevenue, 'Should still count non-deleted great-grandchild');
   }
 
   @IsTest
@@ -878,7 +933,7 @@ private class RollupIntegrationTests {
       null,
       new Rollup__mdt(
         RollupOperation__c = Rollup.Op.UPDATE_CONCAT_DISTINCT.name(),
-        RollupFieldOnCalcItem__c = Opportunity.AmountFormula__c.getDescribe().getName(),
+        RollupFieldOnCalcItem__c = Opportunity.AmountFormula__c.toString(),
         LookupFieldOnCalcItem__c = 'AccountId'
       ),
       new Map<Id, SObject>(),
@@ -893,7 +948,7 @@ private class RollupIntegrationTests {
       null,
       new Rollup__mdt(
         RollupOperation__c = Rollup.Op.UPDATE_CONCAT_DISTINCT.name(),
-        RollupFieldOnCalcItem__c = Opportunity.AmountFormula__c.getDescribe().getName(),
+        RollupFieldOnCalcItem__c = Opportunity.AmountFormula__c.toString(),
         LookupFieldOnCalcItem__c = 'AccountId'
       ),
       new Map<Id, SObject>(),
@@ -1246,7 +1301,7 @@ private class RollupIntegrationTests {
     Rollup.defaultControl = new RollupControl__mdt(ShouldRunAs__c = RollupMetaPicklists.ShouldRunAs.Synchronous);
     Rollup.apexContext = TriggerOperation.AFTER_UPDATE;
     Rollup.records = new List<ContactPointAddress>{ cpa };
-    Rollup.oldRecordsMap = new Map<Id, SObject>{ cpa.Id => new ContactPointAddress(PreferenceRank = 10, Id = cpa.Id) };
+    Rollup.oldRecordsMap = new Map<Id, SObject>{ cpa.Id => new ContactPointAddress(PreferenceRank = 10, Id = cpa.Id, ParentId = acc.Id) };
     Rollup.runFromTrigger();
 
     updatedAcc = [SELECT AnnualRevenue FROM Account];
@@ -1498,7 +1553,10 @@ private class RollupIntegrationTests {
     Test.stopTest();
 
     // validate that queueable ran in addition to sync job
-    System.assertEquals('Completed', [SELECT Status FROM AsyncApexJob WHERE JobType = 'Queueable' LIMIT 1]?.Status);
+    System.assertEquals(
+      1,
+      [SELECT COUNT() FROM AsyncApexJob WHERE JobType = 'Queueable' AND ApexClass.Name = :RollupTestUtils.getNamespaceSafeClassName(RollupAsyncProcessor.class)]
+    );
     List<Account> updatedAccounts = [SELECT AnnualRevenue FROM Account];
     System.assertEquals(2, updatedAccounts.size(), 'Both parent items should have been updated!');
 
@@ -1578,7 +1636,6 @@ private class RollupIntegrationTests {
       new ContactPointAddress(Id = RollupTestUtils.createId(ContactPointAddress.SObjectType), ParentId = acc.Id, PreferenceRank = 10)
     };
 
-    Rollup.records = cpas;
     Rollup.rollupMetadata = new List<Rollup__mdt>{
       new Rollup__mdt(
         RollupFieldOnCalcItem__c = 'PreferenceRank',
@@ -1600,6 +1657,42 @@ private class RollupIntegrationTests {
   }
 
   @IsTest
+  static void shouldRunWithOldRecordsDirectlyFromApex() {
+    Account acc = [SELECT Id FROM Account];
+
+    List<ContactPointAddress> cpas = new List<ContactPointAddress>{
+      new ContactPointAddress(Id = RollupTestUtils.createId(ContactPointAddress.SObjectType), ParentId = acc.Id, PreferenceRank = 5),
+      new ContactPointAddress(Id = RollupTestUtils.createId(ContactPointAddress.SObjectType), ParentId = acc.Id, PreferenceRank = 10)
+    };
+
+    Rollup.rollupMetadata = new List<Rollup__mdt>{
+      new Rollup__mdt(
+        RollupFieldOnCalcItem__c = 'PreferenceRank',
+        LookupObject__c = 'Account',
+        LookupFieldOnCalcItem__c = 'ParentId',
+        LookupFieldOnLookupObject__c = 'Id',
+        RollupFieldOnLookupObject__c = 'AnnualRevenue',
+        RollupOperation__c = 'SUM',
+        CalcItem__c = 'ContactPointAddress'
+      )
+    };
+
+    Test.startTest();
+    Rollup.runFromApex(
+      cpas,
+      new Map<Id, SObject>{
+        cpas[0].Id => new ContactPointAddress(Id = cpas[0].Id, ParentId = acc.Id, PreferenceRank = 0),
+        cpas[1].Id => new ContactPointAddress(Id = cpas[1].Id, ParentId = acc.Id, PreferenceRank = 0)
+      },
+      TriggerOperation.AFTER_UPDATE
+    );
+    Test.stopTest();
+
+    acc = [SELECT AnnualRevenue FROM Account];
+    System.assertEquals(15, acc.AnnualRevenue);
+  }
+
+  @IsTest
   static void shouldDeferUpdateWhenMaxParentRowsLessThanCurrentUpdateRows() {
     Account acc = [SELECT Id FROM Account];
     ContactPointAddress cpa = new ContactPointAddress(ParentId = acc.Id, PreferenceRank = 50, Name = 'MaxParentRows');
@@ -1608,7 +1701,7 @@ private class RollupIntegrationTests {
     Rollup.records = new List<ContactPointAddress>{ cpa };
     Rollup.shouldRun = true;
     Rollup.apexContext = TriggerOperation.AFTER_INSERT;
-    Rollup.defaultControl = new RollupControl__mdt(MaxParentRowsUpdatedAtOnce__c = 0, ShouldRunAs__c = RollupMetaPicklists.ShouldRunAs.Batchable);
+    Rollup.defaultControl = new RollupControl__mdt(MaxParentRowsUpdatedAtOnce__c = 0);
 
     Test.startTest();
     Rollup.sumFromApex(ContactPointAddress.PreferenceRank, ContactPointAddress.ParentId, Account.Id, Account.AnnualRevenue, Account.SObjectType).runCalc();
@@ -1685,11 +1778,37 @@ private class RollupIntegrationTests {
   }
 
   @IsTest
-  static void allowsMultipleRollupsToOperateOnSameParentField() {
+  static void distinctCorrectlyQueriesAdditionalChildren() {
+    Account acc = [SELECT Id FROM Account];
+    ContactPointAddress one = new ContactPointAddress(ParentId = acc.Id, PreferenceRank = 1, Name = 'One');
+    ContactPointAddress two = new ContactPointAddress(ParentId = acc.Id, PreferenceRank = 1, Name = 'Two');
+    ContactPointAddress three = new ContactPointAddress(ParentId = acc.Id, PreferenceRank = 2, Name = 'Three');
+    insert new List<ContactPointAddress>{ one, two, three };
+
+    Rollup.records = new List<ContactPointAddress>{ one };
+    Rollup.shouldRun = true;
+    Rollup.apexContext = TriggerOperation.AFTER_INSERT;
+
+    Test.startTest();
+    Rollup.sumFromApex(ContactPointAddress.Name, ContactPointAddress.ParentId, Account.Id, Account.AnnualRevenue, Account.SObjectType)
+      .modifyMetadata(new Rollup__mdt(IsDistinct__c = true))
+      .runCalc();
+    Test.stopTest();
+
+    acc = [SELECT AnnualRevenue FROM Account WHERE Id = :acc.Id];
+    Assert.areEqual(3, acc.AnnualRevenue);
+  }
+
+  @IsTest
+  static void allowsMultipleRollupsToOperateOnSameParentFieldWithRollupGrouping() {
     Account acc = [SELECT Id, Phone, OwnerId FROM Account];
     Assert.areEqual('9999999999', acc.Phone, 'Test has started under the wrong conditions!');
     String winningPhone = '5555555555';
-    insert new Contact(LastName = 'Second child object', Phone = winningPhone, OwnerId = acc.OwnerId);
+    insert new List<Contact>{
+      new Contact(LastName = 'Second child object', Phone = winningPhone, OwnerId = acc.OwnerId),
+      new Contact(LastName = 'Losing child', Phone = '333', OwnerId = acc.OwnerId)
+    };
+    RollupGrouping__mdt parentGrouping = new RollupGrouping__mdt(Id = RollupTestUtils.createId(RollupGrouping__mdt.SObjectType), RollupOperation__c = 'MAX');
 
     Rollup.onlyUseMockMetadata = true;
     Rollup.rollupMetadata = new List<Rollup__mdt>{
@@ -1700,7 +1819,8 @@ private class RollupIntegrationTests {
         LookupFieldOnLookupObject__c = 'Id',
         RollupFieldOnLookupObject__c = 'AboutMe',
         RollupOperation__c = 'MAX',
-        CalcItem__c = 'Account'
+        CalcItem__c = 'Account',
+        RollupGrouping__r = parentGrouping
       ),
       new Rollup__mdt(
         RollupFieldOnCalcItem__c = 'Phone',
@@ -1709,7 +1829,8 @@ private class RollupIntegrationTests {
         LookupFieldOnLookupObject__c = 'Id',
         RollupFieldOnLookupObject__c = 'AboutMe',
         RollupOperation__c = 'MAX',
-        CalcItem__c = 'Contact'
+        CalcItem__c = 'Contact',
+        RollupGrouping__r = parentGrouping
       )
     };
 
@@ -1720,8 +1841,7 @@ private class RollupIntegrationTests {
 
     User updatedUser = [SELECT AboutMe FROM User WHERE Id = :acc.OwnerId];
     Assert.isNotNull(updatedUser.AboutMe);
-    // TODO uncomment and finish
-    // Assert.areEqual(winningPhone, updatedUser.AboutMe);
+    Assert.areEqual(winningPhone, updatedUser.AboutMe);
   }
 
   @IsTest
@@ -1777,8 +1897,7 @@ private class RollupIntegrationTests {
   static void shouldFilterNonMatchingRollupsOutOfBatch() {
     Contact con = new Contact(FirstName = 'Something', LastName = 'Required');
     insert con;
-    RollupControl__mdt control = RollupControl__mdt.getInstance(Rollup.CONTROL_ORG_DEFAULTS).clone();
-    control.ShouldRunAs__c = RollupMetaPicklists.ShouldRunAs.Batchable;
+
     Rollup.FilterResults results = new Rollup.FilterResults();
     results.matchingItemIds.add(con.Id);
     RollupAsyncProcessor batchProcessor = new RollupAsyncProcessor(
@@ -1791,7 +1910,7 @@ private class RollupIntegrationTests {
       Contact.SObjectType,
       Rollup.Op.CONCAT,
       Rollup.InvocationPoint.FROM_APEX,
-      control,
+      RollupControl__mdt.getInstance(Rollup.CONTROL_ORG_DEFAULTS).clone(),
       new Rollup__mdt(
         CalcItem__c = 'Contact',
         RollupFieldOnCalcItem__c = 'FirstName',
@@ -1839,7 +1958,14 @@ private class RollupIntegrationTests {
     acc = [SELECT SicDesc FROM Account];
     System.assertEquals('b', acc.SicDesc);
     // Validate that job ran as queueable - that the where clause was formatted correctly, in other words
-    System.assertEquals('Completed', [SELECT Status FROM AsyncApexJob WHERE JobType = 'Queueable' LIMIT 1]?.Status);
+    System.assertEquals(
+      1,
+      [
+        SELECT COUNT()
+        FROM AsyncApexJob
+        WHERE JobType = 'Queueable' AND ApexClass.Name = :RollupTestUtils.getNamespaceSafeClassName(RollupDeferredFullRecalcProcessor.class)
+      ]
+    );
   }
 
   /** Schedulable tests */
@@ -1852,7 +1978,7 @@ private class RollupIntegrationTests {
       Rollup.schedule('Test bad query', '0 0 0 0 0', veryBadQuery, 'Account', null);
       Assert.fail('Exception should be thrown above');
     } catch (Exception ex) {
-      Assert.isTrue(ex.getMessage().contains('field ActivityDate does not support aggregate operator MAX'));
+      Assert.isTrue(ex.getMessage().containsIgnoreCase('field ActivityDate does not support aggregate operator MAX'), ex.getMessage());
     }
   }
 
@@ -1863,5 +1989,142 @@ private class RollupIntegrationTests {
     String jobId = Rollup.schedule('Test good query' + System.now(), '0 0 0 * * ?', goodQuery, 'ContactPointAddress', null);
 
     System.assertNotEquals(null, jobId);
+  }
+
+  @IsTest
+  static void scheduleShouldSupportRollupFromParent() {
+    String goodQuery = 'SELECT Id FROM Account';
+    Rollup.onlyUseMockMetadata = true;
+    Rollup.rollupMetadata = new List<Rollup__mdt>{
+      new Rollup__mdt(
+        RollupFieldOnCalcItem__c = 'Email',
+        LookupObject__c = 'Account',
+        LookupFieldOnCalcItem__c = 'AccountId',
+        LookupFieldOnLookupObject__c = 'Id',
+        RollupFieldOnLookupObject__c = 'AnnualRevenue',
+        RollupOperation__c = 'COUNT',
+        CalcItem__c = 'Contact',
+        IsRollupStartedFromParent__c = true,
+        Label = 'Gets printed out in error message if this fails'
+      )
+    };
+
+    String jobId = Rollup.schedule(goodQuery, '0 0 0 * * ?', goodQuery, 'Contact', null);
+
+    Assert.isNotNull(jobId);
+  }
+
+  @IsTest
+  static void usesFullBatchRecalculatorForLargerQueries() {
+    List<Account> accounts = [SELECT Id FROM Account];
+    RollupAsyncProcessor.stubParentRecords = accounts;
+    Rollup.defaultControl = new RollupControl__mdt(MaxQueryRows__c = 0);
+    Rollup.onlyUseMockMetadata = true;
+    Rollup.rollupMetadata = new List<Rollup__mdt>{
+      new Rollup__mdt(
+        RollupFieldOnCalcItem__c = 'Id',
+        LookupObject__c = 'Account',
+        LookupFieldOnCalcItem__c = 'AccountId',
+        LookupFieldOnLookupObject__c = 'Id',
+        RollupFieldOnLookupObject__c = 'AnnualRevenue',
+        RollupOperation__c = 'COUNT',
+        CalcItem__c = 'Contact'
+      )
+    };
+    insert new Contact(AccountId = accounts[0].Id, LastName = 'Does Not Reset');
+
+    String jobId = Rollup.schedule('Does not Reset ' + System.now(), '0 0 0 * * ?', 'SELECT Id, AccountId FROM Contact', 'Account', null);
+
+    CronTrigger job = [SELECT CronJobDetail.Name FROM CronTrigger WHERE Id = :jobId];
+    Assert.isTrue(job.CronJobDetail.Name.contains(RollupFullBatchRecalculator.class.getName()));
+  }
+
+  @IsTest
+  static void doesNotResetParentRecordValuesForLargeScheduledQueries() {
+    Account acc = [SELECT Id FROM Account];
+    acc.AnnualRevenue = 1;
+    update acc;
+
+    Rollup.onlyUseMockMetadata = true;
+    Rollup.rollupMetadata = new List<Rollup__mdt>{
+      new Rollup__mdt(
+        RollupFieldOnCalcItem__c = 'Id',
+        LookupObject__c = 'Account',
+        LookupFieldOnCalcItem__c = 'AccountId',
+        LookupFieldOnLookupObject__c = 'Id',
+        RollupFieldOnLookupObject__c = 'AnnualRevenue',
+        RollupOperation__c = 'COUNT',
+        CalcItem__c = 'Contact'
+      )
+    };
+    insert new Contact(AccountId = acc.Id, LastName = 'Does Not Reset');
+
+    Test.startTest();
+    new RollupFullBatchRecalculator.NonResettingBulkFullRecalc(
+        'SELECT Id, AccountId\nFROM Contact',
+        Rollup.InvocationPoint.FROM_SCHEDULED,
+        new List<Rollup__mdt>{
+          new Rollup__mdt(
+            RollupFieldOnCalcItem__c = 'Id',
+            LookupObject__c = 'Account',
+            LookupFieldOnCalcItem__c = 'AccountId',
+            LookupFieldOnLookupObject__c = 'Id',
+            RollupFieldOnLookupObject__c = 'AnnualRevenue',
+            RollupOperation__c = 'COUNT',
+            CalcItem__c = 'Contact',
+            CalcItemWhereClause__c = RollupCurrencyInfo.isMultiCurrency() ? RollupCurrencyInfo.CURRENCY_ISO_CODE_FIELD_NAME + ' != null' : null
+          )
+        },
+        Contact.SObjectType
+      )
+      .runCalc();
+    Test.stopTest();
+
+    acc = [SELECT AnnualRevenue FROM Account WHERE Id = :acc.Id LIMIT 1];
+    Assert.areEqual(2, acc.AnnualRevenue);
+  }
+
+  @IsTest
+  static void startingFromBatchDoesNotBlowUpCursorBasedFullRecalc() {
+    Test.startTest();
+    Database.executeBatch(new RollupIntegrationTests());
+    Test.stopTest();
+
+    Assert.areEqual(1, [SELECT AnnualRevenue FROM Account].AnnualRevenue);
+  }
+
+  public List<SObject> start(Database.BatchableContext bc) {
+    return [SELECT Id FROM Organization LIMIT 1];
+  }
+
+  public void execute(Database.BatchableContext bc, List<SObject> records) {
+    Rollup.defaultControl = new RollupControl__mdt(
+      BatchChunkSize__c = 1,
+      MaxLookupRowsBeforeBatching__c = 0,
+      IsRollupLoggingEnabled__c = true,
+      MaxRollupRetries__c = 1
+    );
+    Rollup.onlyUseMockMetadata = true;
+    Rollup.rollupMetadata = new List<Rollup__mdt>{
+      new Rollup__mdt(
+        RollupFieldOnCalcItem__c = 'Id',
+        LookupObject__c = 'Account',
+        LookupFieldOnCalcItem__c = 'ParentId',
+        LookupFieldOnLookupObject__c = 'Id',
+        RollupFieldOnLookupObject__c = 'AnnualRevenue',
+        RollupOperation__c = 'REFRESH_COUNT',
+        CalcItem__c = 'ContactPointAddress'
+      )
+    };
+    ContactPointAddress con = new ContactPointAddress(ParentId = [SELECT Id FROM Account LIMIT 1].Id, Name = 'Child');
+    insert con;
+    Rollup.apexContext = TriggerOperation.AFTER_INSERT;
+    rollup.records = new List<ContactPointAddress>{ con };
+    rollup.shouldRun = true;
+    Rollup.runFromTrigger();
+  }
+
+  @SuppressWarnings('PMD.EmptyStatementBlock')
+  public void finish(Database.BatchableContext bc) {
   }
 }

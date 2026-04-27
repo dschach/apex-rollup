@@ -1,6 +1,20 @@
 @IsTest
 private class RollupRepositoryTests {
   @IsTest
+  static void omitsDisabledRollups() {
+    List<Rollup__mdt> metas = RollupRepository.getRollupMetadata();
+
+    Boolean foundDisabled = false;
+    for (Rollup__mdt actualMeta : metas) {
+      if (actualMeta.IsDisabled__c) {
+        foundDisabled = true;
+        throw new IllegalArgumentException('Found disabled metadata: ' + JSON.serialize(actualMeta));
+      }
+    }
+    Assert.isFalse(foundDisabled);
+  }
+
+  @IsTest
   static void transformsCountQueriesProperly() {
     String queryString = 'SELECT Id, AnnualRevenue, Name\nFROM Account';
 
@@ -23,10 +37,70 @@ private class RollupRepositoryTests {
     Assert.isNull(ex);
   }
 
+  @IsTest
+  static void orderBysEndUpCorrectlySorter() {
+    List<RollupOrderBy__mdt> orderBys = new List<RollupOrderBy__mdt>{
+      new RollupOrderBy__mdt(Ranking__c = 3, DeveloperName = 'd'),
+      new RollupOrderBy__mdt(Ranking__c = 0, DeveloperName = 'a'),
+      new RollupOrderBy__mdt(Ranking__c = 1, DeveloperName = 'b'),
+      new RollupOrderBy__mdt(Ranking__c = 2, DeveloperName = 'c')
+    };
+
+    orderBys.sort(new RollupRepository.OrderBySorter());
+
+    Assert.areEqual(0, orderBys.get(0).Ranking__c);
+    Assert.areEqual(1, orderBys.get(1).Ranking__c);
+    Assert.areEqual(2, orderBys.get(2).Ranking__c);
+    Assert.areEqual(3, orderBys.get(3).Ranking__c);
+  }
+
+  @IsTest
+  static void orderBysUseDeveloperNameForTieBreaker() {
+    List<RollupOrderBy__mdt> orderBys = new List<RollupOrderBy__mdt>{
+      new RollupOrderBy__mdt(Ranking__c = 0, DeveloperName = 'd'),
+      new RollupOrderBy__mdt(Ranking__c = 0, DeveloperName = 'a'),
+      new RollupOrderBy__mdt(Ranking__c = 0, DeveloperName = 'b'),
+      new RollupOrderBy__mdt(Ranking__c = 0, DeveloperName = 'c')
+    };
+
+    orderBys.sort(new RollupRepository.OrderBySorter());
+
+    Assert.areEqual('a', orderBys.get(0).DeveloperName);
+    Assert.areEqual('b', orderBys.get(1).DeveloperName);
+    Assert.areEqual('c', orderBys.get(2).DeveloperName);
+    Assert.areEqual('d', orderBys.get(3).DeveloperName);
+  }
+
+  @SuppressWarnings('PMD.EagerlyLoadedDescribeSObjectResult')
+  @IsTest
+  static void allOrderByFieldsAreQueried() {
+    List<Rollup__mdt> rollupMetadata = RollupRepository.getRollupMetadata();
+
+    List<Schema.SObjectField> orderByFields = RollupOrderBy__mdt.SObjectType.getDescribe().fields.getMap().values();
+    Set<Schema.SObjectField> customFields = new Set<Schema.SObjectField>();
+    for (Schema.SObjectField fieldToken : orderByFields) {
+      if (fieldToken.getDescribe().isCustom() && fieldToken.getDescribe().getRelationshipName() == null) {
+        customFields.add(fieldToken);
+      }
+    }
+
+    Boolean hasIteratedOnFields = false;
+    for (Rollup__mdt meta : rollupMetadata) {
+      for (RollupOrderBy__mdt orderBy : meta.RollupOrderBys__r) {
+        for (Schema.SObjectField fieldToken : customFields) {
+          Assert.isTrue(orderBy.isSet(fieldToken), 'Custom field should have been queried: ' + fieldToken);
+          hasIteratedOnFields = true;
+        }
+      }
+    }
+    Assert.isTrue(hasIteratedOnFields);
+  }
+
   /**
    * Serialization proves that we don't get: `System.JSONException: Type unsupported in JSON: common.apex.methods.AccessLevelEnum`
    */
-  @future
+  @SuppressWarnings('PMD.AvoidFutureAnnotation')
+  @Future
   private static void serializedRun(String serializedRepo) {
     RollupRepository repo = (RollupRepository) JSON.deserialize(serializedRepo, RollupRepository.class);
     repo.setQuery('SELECT COUNT() FROM Account').getCount();

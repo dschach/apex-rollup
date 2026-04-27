@@ -1,68 +1,125 @@
-public without sharing virtual class RollupCurrencyInfo {
+@SuppressWarnings('PMD.ExcessiveParameterList,PMD.PropertyNamingConventions')
+public without sharing virtual class RollupCurrencyInfo implements RollupLogger.ToStringObject {
   public static final String CURRENCY_ISO_CODE_FIELD_NAME = 'CurrencyIsoCode';
 
   @TestVisible
-  private static List<RollupCurrencyInfo> mockCurrencyData;
-  private static final Map<String, SObject> TRANSFORMED_MULTICURRENCY_CALC_ITEMS = new Map<String, SObject>();
-  private static final Set<String> HASHED_ITEM_VALUES = new Set<String>();
-  private static Date minDatedCurrencyLookup = Date.newInstance(System.today().year(), 1, 1).addYears(-1);
-  private static Date maxDatedCurrencyLookup = System.today().addYears(1);
-  @TestVisible
   private static Boolean hasLoadedDatedCurrencyInfo = false;
-
-  private static final RollupRepository REPOSITORY = new RollupRepository(RollupRepository.RunAsMode.SYSTEM_LEVEL);
+  @TestVisible
+  private static List<RollupCurrencyInfo> mockBasicCurrencies;
+  @TestVisible
+  private static List<RollupCurrencyInfo> mockDatedCurrencies;
 
   @TestVisible
-  private static Boolean IS_DATED_MULTICURRENCY = false;
+  private static RollupRepository REPOSITORY {
+    get {
+      REPOSITORY = REPOSITORY ?? new RollupRepository(RollupRepository.RunAsMode.SYSTEM_LEVEL);
+      return REPOSITORY;
+    }
+    set;
+  }
+  private static Map<String, SObject> TRANSFORMED_MULTICURRENCY_CALC_ITEMS {
+    get {
+      TRANSFORMED_MULTICURRENCY_CALC_ITEMS = TRANSFORMED_MULTICURRENCY_CALC_ITEMS ?? new Map<String, SObject>();
+      return TRANSFORMED_MULTICURRENCY_CALC_ITEMS;
+    }
+    set;
+  }
+  private static Set<String> HASHED_ITEM_VALUES {
+    get {
+      HASHED_ITEM_VALUES = HASHED_ITEM_VALUES ?? new Set<String>();
+      return HASHED_ITEM_VALUES;
+    }
+    set;
+  }
+
+  private static Date minDatedCurrencyLookup {
+    get {
+      minDatedCurrencyLookup = minDatedCurrencyLookup ?? Date.newInstance(System.today().year(), 1, 1).addYears(-1);
+      return minDatedCurrencyLookup;
+    }
+    set;
+  }
+
+  private static Date maxDatedCurrencyLookup {
+    get {
+      maxDatedCurrencyLookup = maxDatedCurrencyLookup ?? System.today().addYears(1);
+      return maxDatedCurrencyLookup;
+    }
+    set;
+  }
+
+  private static Date maxStartDate {
+    get {
+      maxStartDate = maxStartDate ?? Date.newInstance(9999, 12, 31);
+      return maxStartDate;
+    }
+    set;
+  }
+
+  private static Date minStartDate {
+    get {
+      // this is a sad one - the actual date for the FIRST dated currency record is recorded as 0000-12-30
+      // but this ACTUALLY instantiates a Date with the value 0001-12-30, so we have to use <= when
+      // doing the initial comparison because there's no other way to actually "reach" that date comparitively (that I know of)
+      minStartDate = minStartDate ?? Date.newInstance(0, 12, 30);
+      return minStartDate;
+    }
+    set;
+  }
 
   // Can't be Schema.SObjectType => Schema.SObjectField because not all orgs have OppLineItems/Splits
   // technically there's a hierarchy for OpportunityLineItem that goes Opportunity.CloseDate > ServiceDate > (ProductDate || ScheduleDate)
   // but because this can be configured on a per-rollup basis, it's fine to leave Opportunity.CloseDate as the default since it can be overridden
-  private static final Map<String, List<String>> DATED_MULTICURRENCY_SUPPORTED_OBJECTS = new Map<String, List<String>>{
-    'Opportunity' => new List<String>{ 'CloseDate' },
-    'OpportunityLineItem' => new List<String>{ 'ServiceDate' },
-    'OpportunityLineItemSchedule' => new List<String>{ 'ScheduleDate' },
-    'OpportunitySplit' => new List<String>{ 'Opportunity', 'CloseDate' }
-  };
+  private static Map<String, List<String>> DATED_MULTICURRENCY_SUPPORTED_OBJECTS {
+    get {
+      DATED_MULTICURRENCY_SUPPORTED_OBJECTS = DATED_MULTICURRENCY_SUPPORTED_OBJECTS ??
+        new Map<String, List<String>>{
+          'Opportunity' => new List<String>{ 'CloseDate' },
+          'OpportunityLineItem' => new List<String>{ 'ServiceDate' },
+          'OpportunityLineItemSchedule' => new List<String>{ 'ScheduleDate' },
+          'OpportunitySplit' => new List<String>{ 'Opportunity', 'CloseDate' }
+        };
+      return DATED_MULTICURRENCY_SUPPORTED_OBJECTS;
+    }
+    set;
+  }
+
+  private static Set<String> DATED_CURRENCY_QUERIES {
+    get {
+      DATED_CURRENCY_QUERIES = DATED_CURRENCY_QUERIES ?? new Set<String>();
+      return DATED_CURRENCY_QUERIES;
+    }
+    set;
+  }
 
   @TestVisible
   private static Boolean IS_MULTICURRENCY {
     get {
-      if (IS_MULTICURRENCY == null) {
-        IS_MULTICURRENCY = UserInfo.isMultiCurrencyOrganization();
-      }
+      IS_MULTICURRENCY = IS_MULTICURRENCY ?? UserInfo.isMultiCurrencyOrganization();
       return IS_MULTICURRENCY;
     }
     set;
   }
 
-  private static final RollupCurrencyInfo FALLBACK_INFO {
+  private static RollupCurrencyInfo FALLBACK_INFO {
     get {
-      if (FALLBACK_INFO == null) {
-        FALLBACK_INFO = new RollupCurrencyInfo();
-        FALLBACK_INFO.DecimalPlaces = 2;
-        FALLBACK_INFO.ConversionRate = 1;
-      }
+      FALLBACK_INFO = FALLBACK_INFO ?? new RollupCurrencyInfo().setDefaults(1);
       return FALLBACK_INFO;
     }
     set;
   }
 
-  private static final Map<String, RollupCurrencyInfo> CURRENCY_ISO_CODE_TO_CURRENCY {
+  private static Map<String, RollupCurrencyInfo> CURRENCY_ISO_CODE_TO_CURRENCY {
     get {
-      if (CURRENCY_ISO_CODE_TO_CURRENCY == null) {
-        CURRENCY_ISO_CODE_TO_CURRENCY = getCurrencyMap();
-      }
+      CURRENCY_ISO_CODE_TO_CURRENCY = CURRENCY_ISO_CODE_TO_CURRENCY ?? getCurrencyMap();
       return CURRENCY_ISO_CODE_TO_CURRENCY;
     }
     set;
   }
 
-  private static final Map<Schema.SObjectType, Map<String, Schema.SObjectField>> TYPE_TO_FIELDS {
+  private static Map<Schema.SObjectType, Map<String, Schema.SObjectField>> TYPE_TO_FIELDS {
     get {
-      if (TYPE_TO_FIELDS == null) {
-        TYPE_TO_FIELDS = new Map<Schema.SObjectType, Map<String, Schema.SObjectField>>();
-      }
+      TYPE_TO_FIELDS = TYPE_TO_FIELDS ?? new Map<Schema.SObjectType, Map<String, Schema.SObjectField>>();
       return TYPE_TO_FIELDS;
     }
     set;
@@ -70,16 +127,40 @@ public without sharing virtual class RollupCurrencyInfo {
 
   public String IsoCode { get; set; }
   public Decimal ConversionRate { get; set; }
-  public Integer DecimalPlaces { get; set; }
   // next two fields only available for DatedConversionRate-based RollupCurrencyInfos
   public Date StartDate { get; set; }
   public Date NextStartDate { get; set; }
+
+  public virtual override String toString() {
+    return this.getTypeName() +
+      ':[' +
+      JSON.serializePretty(
+        new Map<String, Object>{
+          'IsoCode' => this.IsoCode,
+          'ConversionRate' => this.ConversionRate,
+          'StartDate' => this.StartDate,
+          'NextStartDate' => this.NextStartDate
+        },
+        true
+      ) +
+      ']';
+  }
+
+  protected virtual String getTypeName() {
+    return 'RollupCurrencyInfo';
+  }
 
   protected virtual RollupCurrencyInfo getInfo(SObject calcItem, String isoCode) {
     return this;
   }
 
+  @SuppressWarnings('PMD.EmptyStatementBlock')
   protected virtual void addInfo(RollupCurrencyInfo info) {
+  }
+
+  private RollupCurrencyInfo setDefaults(Decimal conversionRate) {
+    this.ConversionRate = conversionRate;
+    return this;
   }
 
   public static List<String> getMultiCurrencyFields(Schema.DescribeSObjectResult objectToken) {
@@ -114,13 +195,12 @@ public without sharing virtual class RollupCurrencyInfo {
     return IS_MULTICURRENCY;
   }
 
-  public static SObject getCalcItem(SObject calcItem) {
-    SObject potentiallyTransformedItem = TRANSFORMED_MULTICURRENCY_CALC_ITEMS.get(getKey(calcItem));
-    return potentiallyTransformedItem != null ? potentiallyTransformedItem : calcItem;
+  public static SObject getCalcItem(SObject calcItem, String parentIsoCode) {
+    return TRANSFORMED_MULTICURRENCY_CALC_ITEMS.get(getKey(calcItem, parentIsoCode)) ?? calcItem;
   }
 
   public static RollupCurrencyInfo getCurrencyInfo(String currencyIsoCode) {
-    return CURRENCY_ISO_CODE_TO_CURRENCY.containsKey(currencyIsoCode) ? CURRENCY_ISO_CODE_TO_CURRENCY.get(currencyIsoCode) : FALLBACK_INFO;
+    return CURRENCY_ISO_CODE_TO_CURRENCY.get(currencyIsoCode) ?? FALLBACK_INFO;
   }
 
   public static void setCurrencyIsoCode(SObject record, String isoCode) {
@@ -137,16 +217,16 @@ public without sharing virtual class RollupCurrencyInfo {
     return newParent;
   }
 
-  private static String getKey(SObject calcItem) {
-    return calcItem.Id + ((Object) calcItem).hashCode().format();
+  private static String getKey(SObject calcItem, String parentIsoCode) {
+    return calcItem.Id + ((Object) calcItem).hashCode().format() + parentIsoCode;
   }
 
   private static void loadProperMinMaxDates(List<SObject> calcItems, Schema.SObjectField rollupField) {
-    if (hasLoadedDatedCurrencyInfo || CURRENCY_ISO_CODE_TO_CURRENCY == null || rollupField.getDescribe().getType() != Schema.DisplayType.CURRENCY) {
+    if (CURRENCY_ISO_CODE_TO_CURRENCY == null || rollupField.getDescribe().getType() != Schema.DisplayType.CURRENCY) {
       return;
     }
     for (SObject calcItem : calcItems) {
-      if (DATED_MULTICURRENCY_SUPPORTED_OBJECTS.containsKey(calcItem.getSObjectType().getDescribe().getName()) == false) {
+      if (DATED_MULTICURRENCY_SUPPORTED_OBJECTS.containsKey(calcItem.getSObjectType().toString()) == false) {
         return;
       }
       Datetime currencyDate = getCurrencyDate(calcItem);
@@ -156,17 +236,41 @@ public without sharing virtual class RollupCurrencyInfo {
         maxDatedCurrencyLookup = currencyDate.date();
       }
     }
-
     hasLoadedDatedCurrencyInfo = true;
-    REPOSITORY.setQuery(
-        'SELECT IsoCode, ConversionRate, StartDate, NextStartDate FROM DatedConversionRate WHERE StartDate >= :minDatedCurrencyLookup AND NextStartDate <= :maxDatedCurrencyLookup'
-      )
-      .setArg('minDatedCurrencyLookup', minDatedCurrencyLookup)
-      .setArg('maxDatedCurrencyLookup', maxDatedCurrencyLookup);
-    List<RollupCurrencyInfo> datedCurrencyInfos = (List<RollupCurrencyInfo>) JSON.deserialize(JSON.serialize(REPOSITORY.get()), List<RollupCurrencyInfo>.class);
-    IS_DATED_MULTICURRENCY = datedCurrencyInfos.isEmpty() == false;
-    mapCurrencies(CURRENCY_ISO_CODE_TO_CURRENCY, datedCurrencyInfos);
-    IS_DATED_MULTICURRENCY = false;
+
+    String datedCurrencyQuery = 'SELECT IsoCode, ConversionRate, StartDate, NextStartDate FROM DatedConversionRate WHERE (NextStartDate <= :maxDatedCurrencyLookup OR NextStartDate = :maxStartDate) AND (StartDate < :minStartDate OR StartDate >= :minDatedCurrencyLookup)';
+    String hashedCurrencyQuery = datedCurrencyQuery + minDatedCurrencyLookup + maxDatedCurrencyLookup;
+
+    if (DATED_CURRENCY_QUERIES.contains(hashedCurrencyQuery)) {
+      return;
+    } else {
+      DATED_CURRENCY_QUERIES.add(hashedCurrencyQuery);
+    }
+
+    REPOSITORY.setArg('minDatedCurrencyLookup', minDatedCurrencyLookup)
+      .setArg('maxDatedCurrencyLookup', maxDatedCurrencyLookup)
+      .setArg('minStartDate', minStartDate)
+      .setArg('maxStartDate', maxStartDate);
+    List<RollupCurrencyInfo> datedCurrencyInfos = getCurrencies(datedCurrencyQuery);
+
+    // first loop - transform any existing matches into CurrencyFinder instances
+    for (RollupCurrencyInfo datedInfo : datedCurrencyInfos) {
+      RollupCurrencyInfo possiblyMatchingInfo = CURRENCY_ISO_CODE_TO_CURRENCY.get(datedInfo.IsoCode);
+      if (possiblyMatchingInfo != null && (possiblyMatchingInfo instanceof CurrencyFinder) == false) {
+        possiblyMatchingInfo = new CurrencyFinder(possiblyMatchingInfo);
+        CURRENCY_ISO_CODE_TO_CURRENCY.put(datedInfo.IsoCode, possiblyMatchingInfo);
+      }
+    }
+    // second loop - populate the rest
+    for (RollupCurrencyInfo datedInfo : datedCurrencyInfos) {
+      RollupCurrencyInfo possiblyMatchingInfo = CURRENCY_ISO_CODE_TO_CURRENCY.get(datedInfo.IsoCode);
+      if (possiblyMatchingInfo == null) {
+        possiblyMatchingInfo = new CurrencyFinder(datedInfo);
+        CURRENCY_ISO_CODE_TO_CURRENCY.put(datedInfo.IsoCode, possiblyMatchingInfo);
+      } else if ((datedInfo instanceof CurrencyFinder) == false) {
+        possiblyMatchingInfo.addInfo(datedInfo);
+      }
+    }
   }
 
   private static void actuallyTransformCurrency(
@@ -177,7 +281,7 @@ public without sharing virtual class RollupCurrencyInfo {
   ) {
     if (calcItem.getSObjectType().getDescribe().fields.getMap().containsKey(CURRENCY_ISO_CODE_FIELD_NAME)) {
       String calcItemIsoCode = (String) calcItem.get(CURRENCY_ISO_CODE_FIELD_NAME);
-      String transformKey = getKey(calcItem);
+      String transformKey = getKey(calcItem, parentIsoCode);
       SObject clonedCalcItem = TRANSFORMED_MULTICURRENCY_CALC_ITEMS.get(transformKey);
       String hashKey = getHashKey(calcItem, opFieldOnCalcItem);
       if (
@@ -192,7 +296,7 @@ public without sharing virtual class RollupCurrencyInfo {
         return;
       }
       // the worst possible scenario has occurred - the currencies differ and we haven't already populated the map
-      clonedCalcItem = clonedCalcItem == null ? calcItem.clone(true, true, true, true) : clonedCalcItem;
+      clonedCalcItem = clonedCalcItem ?? calcItem.clone(true, true, true, true);
       clonedCalcItem = convertToParentCurrency(calcItem, clonedCalcItem, opFieldOnCalcItem, calcItemIsoCode, parentIsoCode, hashKey);
 
       for (RollupOrderBy__mdt orderBy : orderBys) {
@@ -221,11 +325,10 @@ public without sharing virtual class RollupCurrencyInfo {
 
     Decimal calcItemDenominator = (Decimal) calcItem.get(fieldOnCalcItem);
     if (calcItemDenominator != null) {
-      Decimal calcItemAmountInOrgCurrency =
-        CURRENCY_ISO_CODE_TO_CURRENCY.get(calcItemIsoCode).getInfo(calcItem, calcItemIsoCode).ConversionRate / calcItemDenominator;
-      Double calcItemAmountInParentCurrency = (CURRENCY_ISO_CODE_TO_CURRENCY.get(parentIsoCode).getInfo(calcItem, parentIsoCode).ConversionRate /
-        calcItemAmountInOrgCurrency)
-        .doubleValue();
+      RollupCurrencyInfo childCurrencyInfo = CURRENCY_ISO_CODE_TO_CURRENCY.get(calcItemIsoCode).getInfo(calcItem, calcItemIsoCode);
+      RollupCurrencyInfo parentCurrencyInfo = CURRENCY_ISO_CODE_TO_CURRENCY.get(parentIsoCode).getInfo(calcItem, parentIsoCode);
+      Decimal calcItemAmountInOrgCurrency = childCurrencyInfo.ConversionRate / calcItemDenominator;
+      Double calcItemAmountInParentCurrency = (parentCurrencyInfo?.ConversionRate / calcItemAmountInOrgCurrency)?.doubleValue();
       Map<String, Schema.SObjectField> fieldNameToField = TYPE_TO_FIELDS.get(calcItem.getSObjectType());
       if (fieldNameToField == null) {
         fieldNameToField = calcItem.getSObjectType().getDescribe(SObjectDescribeOptions.DEFERRED).fields.getMap();
@@ -239,54 +342,42 @@ public without sharing virtual class RollupCurrencyInfo {
   }
 
   private static String getHashKey(SObject calcItem, Schema.SObjectField opFieldOnCalcItem) {
-    return '' + calcItem.Id + opFieldOnCalcItem.getDescribe().getName();
+    return '' + calcItem.Id + opFieldOnCalcItem.toString() + calcItem.hashCode();
   }
 
   private static Map<String, RollupCurrencyInfo> getCurrencyMap() {
-    List<RollupCurrencyInfo> currencyInfos = new List<RollupCurrencyInfo>();
+    List<RollupCurrencyInfo> currencyInfos = getCurrencies('SELECT IsoCode, ConversionRate, DecimalPlaces FROM CurrencyType WHERE IsActive = TRUE');
     Map<String, RollupCurrencyInfo> currencyInfoMap = new Map<String, RollupCurrencyInfo>();
-    if (mockCurrencyData != null) {
-      currencyInfos.addAll(mockCurrencyData);
-    } else {
-      if (IS_MULTICURRENCY) {
-        String query = 'SELECT IsoCode, ConversionRate, DecimalPlaces FROM CurrencyType WHERE IsActive = TRUE';
-        currencyInfos.addAll((List<RollupCurrencyInfo>) JSON.deserialize(JSON.serialize(REPOSITORY.setQuery(query).get()), List<RollupCurrencyInfo>.class));
-      }
+    for (RollupCurrencyInfo currencyInfo : currencyInfos) {
+      currencyInfoMap.put(currencyInfo.IsoCode, currencyInfo);
     }
-    mapCurrencies(currencyInfoMap, currencyInfos);
     return currencyInfoMap;
   }
 
-  private static void mapCurrencies(Map<String, RollupCurrencyInfo> currencyInfoMap, List<RollupCurrencyInfo> currencyInfos) {
-    for (RollupCurrencyInfo currencyInfo : currencyInfos) {
-      RollupCurrencyInfo mappedInfo = currencyInfoMap.get(currencyInfo.IsoCode);
-      if (mappedInfo == null) {
-        mappedInfo = IS_DATED_MULTICURRENCY ? new CurrencyFinder(currencyInfo) : currencyInfo;
-        currencyInfoMap.put(currencyInfo.IsoCode, mappedInfo);
-      }
-      mappedInfo.addInfo(currencyInfo);
+  private static List<RollupCurrencyInfo> getCurrencies(String query) {
+    List<RollupCurrencyInfo> currencyInfos = new List<RollupCurrencyInfo>();
+    if (mockBasicCurrencies != null) {
+      currencyInfos.addAll(mockBasicCurrencies);
+      mockBasicCurrencies = null;
+    } else if (mockDatedCurrencies != null) {
+      currencyInfos.addAll(mockDatedCurrencies);
+      mockDatedCurrencies = null;
+    } else if (IS_MULTICURRENCY) {
+      currencyInfos.addAll((List<RollupCurrencyInfo>) JSON.deserialize(JSON.serialize(REPOSITORY.setQuery(query).get()), List<RollupCurrencyInfo>.class));
     }
+    return currencyInfos;
   }
 
   private static Datetime getCurrencyDate(SObject calcItem) {
-    List<String> itemToDateFieldMapping = DATED_MULTICURRENCY_SUPPORTED_OBJECTS.get(calcItem.getSObjectType().getDescribe().getName());
-    switch on itemToDateFieldMapping?.size() {
-      when 1 {
-        return calcItem.isSet(itemToDateFieldMapping[0]) ? (Datetime) calcItem.get(itemToDateFieldMapping[0]) : null;
-      }
-      when 2 {
-        SObject parentObject = calcItem.getSObject(itemToDateFieldMapping[0]);
-        return parentObject != null ? (Datetime) parentObject.get(itemToDateFieldMapping[1]) : null;
-      }
-      when else {
-        return null;
-      }
+    List<String> itemToDateFieldMapping = new List<String>(DATED_MULTICURRENCY_SUPPORTED_OBJECTS.get(calcItem.getSObjectType().toString()));
+    while (itemToDateFieldMapping.size() > 1) {
+      calcItem = calcItem.getSObject(itemToDateFieldMapping.remove(0));
     }
+    return calcItem.isSet(itemToDateFieldMapping[0]) ? (Datetime) calcItem.get(itemToDateFieldMapping[0]) : null;
   }
 
   private class CurrencyFinder extends RollupCurrencyInfo {
     private final List<RollupCurrencyInfo> currencyInfos = new List<RollupCurrencyInfo>();
-    private final Map<Id, RollupCurrencyInfo> cachedItemToInfo = new Map<Id, RollupCurrencyInfo>();
     private RollupCurrencyInfo baseInfo;
 
     public CurrencyFinder(RollupCurrencyInfo info) {
@@ -302,20 +393,23 @@ public without sharing virtual class RollupCurrencyInfo {
     }
 
     protected override RollupCurrencyInfo getInfo(SObject calcItem, String isoCode) {
-      if (cachedItemToInfo.containsKey(calcItem.Id)) {
-        return cachedItemToInfo.get(calcItem.Id);
-      }
       Datetime currencyDate = getCurrencyDate(calcItem);
       if (this.currencyInfos.isEmpty() == false && currencyDate != null) {
         for (RollupCurrencyInfo info : this.currencyInfos) {
           if (info.IsoCode == isoCode && info.NextStartDate > currencyDate && currencyDate >= info.StartDate) {
-            cachedItemToInfo.put(calcItem.Id, info);
             return info;
           }
         }
       }
-      cachedItemToInfo.put(calcItem.Id, this.baseInfo);
       return this.baseInfo;
+    }
+
+    public override String toString() {
+      return this.getTypeName() + '[' + this.baseInfo + '\n\t\t:' + this.currencyInfos + ']';
+    }
+
+    protected override String getTypeName() {
+      return 'CurrencyFinder';
     }
   }
 }

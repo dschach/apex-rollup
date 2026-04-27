@@ -107,197 +107,67 @@
     </customMetadataTypeAccesses>
     <fieldPermissions>
         <editable>true</editable>
-        <field>RollupControl__mdt.BatchChunkSize__c</field>
+        <field>RollupState__c.Body0__c</field>
         <readable>true</readable>
     </fieldPermissions>
     <fieldPermissions>
         <editable>true</editable>
-        <field>RollupControl__mdt.IsMergeReparentingEnabled__c</field>
+        <field>RollupState__c.RelatedJobId__c</field>
         <readable>true</readable>
     </fieldPermissions>
     <fieldPermissions>
         <editable>true</editable>
-        <field>RollupControl__mdt.IsRollupLoggingEnabled__c</field>
+        <field>RollupState__c.RelatedRecordKeys0__c</field>
         <readable>true</readable>
     </fieldPermissions>
     <fieldPermissions>
         <editable>true</editable>
-        <field>RollupControl__mdt.MaxLookupRowsBeforeBatching__c</field>
+        <field>RollupState__c.RelatedRecordKeys1__c</field>
         <readable>true</readable>
     </fieldPermissions>
     <fieldPermissions>
         <editable>true</editable>
-        <field>RollupControl__mdt.MaxParentRowsUpdatedAtOnce__c</field>
+        <field>RollupState__c.RelatedRecordKeys2__c</field>
         <readable>true</readable>
     </fieldPermissions>
     <fieldPermissions>
         <editable>true</editable>
-        <field>RollupControl__mdt.MaxNumberOfQueries__c</field>
+        <field>RollupState__c.RelatedRecordKeys3__c</field>
         <readable>true</readable>
     </fieldPermissions>
     <fieldPermissions>
         <editable>true</editable>
-        <field>RollupControl__mdt.MaxRollupRetries__c</field>
+        <field>RollupState__c.RelatedRecordKeys4__c</field>
         <readable>true</readable>
     </fieldPermissions>
     <fieldPermissions>
         <editable>true</editable>
-        <field>RollupControl__mdt.OnlyRunInFlowContexts__c</field>
+        <field>RollupState__c.RelatedRecordKeys5__c</field>
         <readable>true</readable>
     </fieldPermissions>
     <fieldPermissions>
         <editable>true</editable>
-        <field>RollupControl__mdt.ReplaceCalcItemsAsyncWhenOverCount__c</field>
+        <field>RollupState__c.RelatedRecordKeys6__c</field>
         <readable>true</readable>
     </fieldPermissions>
     <fieldPermissions>
         <editable>true</editable>
-        <field>RollupControl__mdt.ShouldAbortRun__c</field>
+        <field>RollupState__c.RelatedRecordKeys7__c</field>
         <readable>true</readable>
     </fieldPermissions>
     <fieldPermissions>
         <editable>true</editable>
-        <field>RollupControl__mdt.ShouldDuplicateRulesBeIgnored__c</field>
+        <field>RollupState__c.RelatedRecordKeys8__c</field>
         <readable>true</readable>
     </fieldPermissions>
     <fieldPermissions>
         <editable>true</editable>
-        <field>RollupControl__mdt.ShouldRunSingleRecordsSynchronously__c</field>
+        <field>RollupState__c.RelatedRecordKeys9__c</field>
         <readable>true</readable>
     </fieldPermissions>
     <fieldPermissions>
         <editable>true</editable>
-        <field>RollupControl__mdt.ShouldSkipResettingParentFields__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>RollupControl__mdt.TriggerOrInvocableName__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>RollupOrderBy__mdt.NullSortOrder__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>RollupOrderBy__mdt.SortOrder__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>Rollup__mdt.CalcItemWhereClause__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>Rollup__mdt.ChangedFieldsOnCalcItem__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>Rollup__mdt.ConcatDelimiter__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>Rollup__mdt.CurrencyFieldMapping__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>Rollup__mdt.Description__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>Rollup__mdt.FullRecalculationDefaultNumberValue__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>Rollup__mdt.FullRecalculationDefaultStringValue__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>Rollup__mdt.GrandparentRelationshipFieldPath__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-        <fieldPermissions>
-        <editable>true</editable>
-        <field>Rollup__mdt.GroupByFields__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>Rollup__mdt.GroupByRowEndDelimiter__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>Rollup__mdt.GroupByRowStartDelimiter__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>Rollup__mdt.IsFullRecordSet__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>Rollup__mdt.IsRollupStartedFromParent__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>Rollup__mdt.IsTableFormatted__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>Rollup__mdt.LimitAmount__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>Rollup__mdt.OneToManyGrandparentFields__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>Rollup__mdt.OrderByFirstLast__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>Rollup__mdt.RollupToUltimateParent__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>Rollup__mdt.SharingMode__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>Rollup__mdt.ShouldRunWithoutCustomSettingEnabled__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>Rollup__mdt.SplitConcatDelimiterOnCalcItem__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>Rollup__mdt.UltimateParentLookup__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>RollupPluginParameter__mdt.Description__c</field>
+        <field>RollupState__c.RelatedRecordKeys10__c</field>
         <readable>true</readable>
     </fieldPermissions>
     <layoutAssignments>
@@ -315,5 +185,14 @@
     <layoutAssignments>
         <layout>RollupPluginParameter__mdt-Rollup Plugin Parameter Layout</layout>
     </layoutAssignments>
+    <objectPermissions>
+        <allowCreate>true</allowCreate>
+        <allowDelete>true</allowDelete>
+        <allowEdit>true</allowEdit>
+        <allowRead>true</allowRead>
+        <modifyAllRecords>true</modifyAllRecords>
+        <object>RollupState__c</object>
+        <viewAllRecords>true</viewAllRecords>
+    </objectPermissions>
     <userLicense>Salesforce</userLicense>
 </Profile>
